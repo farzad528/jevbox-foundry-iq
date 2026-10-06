@@ -53,6 +53,13 @@ export type SearchFilters = z.infer<typeof searchFiltersSchema>;
 function endDate(value: string) {
   return Date.parse(value) + (value.length === 10 ? 86_400_000 - 1 : 0);
 }
+export function searchDateBounds(filters: Pick<SearchFilters, "createdAfter" | "createdBefore">) {
+  searchFiltersSchema.parse(filters);
+  return {
+    after: filters.createdAfter ? new Date(Date.parse(filters.createdAfter)).toISOString() : undefined,
+    before: filters.createdBefore ? new Date(endDate(filters.createdBefore)).toISOString() : undefined,
+  };
+}
 export function matchesSearchFilters(
   resource: { created: string; mime: string; access: string },
   filters: SearchFilters,

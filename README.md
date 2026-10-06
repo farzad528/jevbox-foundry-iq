@@ -1,5 +1,15 @@
 # Jevbox
 
+## Foundry IQ fork
+
+This fork adds an isolated, approval-gated Entra / Foundry IQ profile with a
+reviewed wiki, native Search ACL lifecycle and the existing Jevbox viewers.
+Run `pnpm dev:foundry` for the local setup screen; without approved private
+configuration it starts without database or cloud access and rejects protected
+and legacy paths. See [Foundry IQ setup and verification boundaries](docs/foundry-iq.md).
+The real-Azure PoC is **not live-verified**. The upstream behavior documented
+below remains separately available in the `legacy` profile.
+
 A full stack, permission-aware document library. Browse with Extend UI Finder, inspect document trees and parsed output, share with organization members, search the hierarchy with JEV, and ask source-grounded questions through the AI SDK.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/extend-hq/jevbox)
@@ -34,12 +44,14 @@ Switch between visual browsing, a compact outline, folder columns, and full-page
 
 ## Run locally
 
-Requires Node 24.6+, pnpm 12.9.1, and a running Docker engine with Compose.
+Requires Node 24.6+, pnpm 12.8.1, and a running Docker engine with Compose. Use the version pinned in `package.json`; the multi-document lockfile requires pnpm 12, not pnpm 10.
+
+If pnpm is not installed, use `npx --yes --package=pnpm@12.8.1 pnpm` in place of `pnpm` in the commands below. This runs the pinned release without changing a global installation.
 
 For the first run, from the repository root:
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm setup:local
 pnpm services:up
 pnpm dev

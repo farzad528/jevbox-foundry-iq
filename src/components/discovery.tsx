@@ -56,6 +56,7 @@ import {
 } from "./ui/message-scroller";
 import { ResourceThumbnail } from "./resource-thumbnail";
 import { RetrievalTree } from "./retrieval-tree";
+import { RunConsoleDock } from "./run-console";
 import { DocumentView } from "./document";
 import { PanelRight, X, Copy, Check, Square } from "./icons";
 import { ProviderLogo } from "./provider-logo";
@@ -980,6 +981,10 @@ export function ChatView({
     setPreview(null);
   }, [chatId, blocked]);
   return (
+    <RunConsoleDock runs={blocked ? [] : [
+      ...messages.flatMap((message) => message.run ? [message.run] : []),
+      ...turns.flatMap((turn) => turn.run ? [turn.run] : []),
+    ]}>
     <ResizablePanelGroup
       key={compact ? "compact" : "wide"}
       className="chat-layout"
@@ -1666,33 +1671,6 @@ export function ChatView({
                 </Button>
               </div>
             </div>
-            <div className="source-preview-retrieval">
-              <RetrievalTree
-                trace={preview.trace}
-                retrievalDurationMs={preview.retrievalDurationMs}
-                activeDocumentId={preview.source.documentId}
-                activeNodeId={preview.source.nodeId}
-                defaultOpen
-                onSelect={(documentId, nodeId) =>
-                  previewRetrievalPath(
-                    preview.trace,
-                    documentId,
-                    nodeId,
-                    false,
-                    preview.retrievalDurationMs,
-                  )
-                }
-                onPreview={(documentId, nodeId) =>
-                  previewRetrievalPath(
-                    preview.trace,
-                    documentId,
-                    nodeId,
-                    true,
-                    preview.retrievalDurationMs,
-                  )
-                }
-              />
-            </div>
             <div className="source-preview-document">
               <DocumentView
                 documentId={preview.source.documentId}
@@ -1732,5 +1710,6 @@ export function ChatView({
         </>
       )}
     </ResizablePanelGroup>
+    </RunConsoleDock>
   );
 }

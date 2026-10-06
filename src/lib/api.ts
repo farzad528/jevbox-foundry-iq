@@ -161,6 +161,7 @@ export type Message = {
   attachments?: { id: string; name: string }[];
   trace?: RetrievalStep[];
   retrievalDurationMs?: number;
+  run?: import("../../shared/observability").RunSnapshot;
 };
 export const flatten = (nodes: IndexNode[]): IndexNode[] =>
   nodes.flatMap((n) => [n, ...flatten(n.children)]);

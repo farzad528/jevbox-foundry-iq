@@ -6,6 +6,7 @@ import {
   isStepCount,
   type LanguageModel,
   type ModelMessage,
+  type LanguageModelUsage,
 } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
@@ -58,6 +59,7 @@ export type AnswerExecution = {
   maxOutputTokens?: number;
   onText?: (text: string) => Promise<void>;
   beforeStep?: () => Promise<void>;
+  onStepUsage?: (usage: LanguageModelUsage) => Promise<void>;
   searchDocuments?: (
     query: string,
     signal?: AbortSignal,
@@ -429,6 +431,9 @@ export async function generateAnswer(
         if (toolFailure) throw toolFailure;
         await execution?.beforeStep?.();
         return stepNumber >= 5 ? { toolChoice: "none" as const } : {};
+      },
+      onStepFinish: async ({ usage }: { usage: LanguageModelUsage }) => {
+        await execution?.onStepUsage?.(usage);
       },
       abortSignal: execution
         ? AbortSignal.any([execution.signal, AbortSignal.timeout(90000)])

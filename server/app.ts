@@ -52,6 +52,7 @@ import {
   type PermissionCache,
 } from "./db";
 import { createProviders, getSettings, type Fetch } from "./providers";
+import { assertLegacyProfile } from "./foundry/config";
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 const now = () => new Date().toISOString();
 const name = z
@@ -77,6 +78,7 @@ export async function createApp(options: {
   sendAuthEmail?: SendAuthEmail;
   workers?: QueueName[];
 }) {
+  assertLegacyProfile();
   const store = await createStore(options.directory, options.databaseUrl);
   const downloads = createFileDownloads(store);
   let authentication: ReturnType<typeof createAuthentication>;
@@ -113,6 +115,7 @@ export async function createApp(options: {
     .filter(Boolean);
   if (trustedProxies?.length) app.set("trust proxy", trustedProxies);
   app.get("/health/live", (_req, res) => res.json({ ok: true }));
+  app.get("/api/profile", (_req, res) => res.json({ profile: "legacy" }));
   app.get("/health/ready", async (_req, res) => {
     try {
       await store.one("SELECT 1");

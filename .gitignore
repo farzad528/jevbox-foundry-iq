@@ -24,6 +24,10 @@ playwright-report/
 .playwright-cli/
 .playwright-mcp/
 *.log
+*.approval.local.json
+*.runtime.local.json
+*.native-proof.local.json
+*.msal-cache*
 
 .terraform/
 *.tfstate*

@@ -35,7 +35,7 @@ export type FilingPlan = {
   branch: Branch[];
   trace: Trace[];
 };
-const branchSchema = z
+export const branchSchema = z
   .object({
     folders: z
       .array(

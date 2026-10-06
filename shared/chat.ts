@@ -21,6 +21,7 @@ export type ChatTurn = {
   selectedModel: ChatModel | null;
   error: string | null;
   regenerating: boolean;
+  run?: import("./observability").RunSnapshot;
 };
 export function isChatWorking(status?: ChatTurn["status"] | null) {
   return (

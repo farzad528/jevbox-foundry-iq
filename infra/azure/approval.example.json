@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "status": "unapproved",
+  "candidateOnly": {
+    "tenantId": null,
+    "subscriptionId": null,
+    "subscriptionName": null
+  },
+  "deployment": {
+    "tenantId": null,
+    "subscriptionId": null,
+    "resourceGroup": null,
+    "region": null,
+    "owner": null,
+    "searchName": null,
+    "foundryName": null,
+    "projectName": null,
+    "searchSku": null,
+    "searchReplicas": null,
+    "modelDeployments": [],
+    "embeddingDimensions": null,
+    "publicNetworkAccess": null
+  },
+  "identities": {
+    "provisionerObjectId": null,
+    "queryPrincipalId": null,
+    "ingestionPrincipalId": null,
+    "projectModelPrincipalId": null,
+    "userAObjectId": null,
+    "userBObjectId": null,
+    "entraApplicationId": null,
+    "localRedirectUri": "http://localhost:4310/api/entra/callback",
+    "delegatedSearchScope": null,
+    "consentOwner": null,
+    "credentialStorageAndRotation": null
+  },
+  "budget": {
+    "currency": null,
+    "searchHourlyRate": null,
+    "semanticAndPlanningCost": null,
+    "modelTokenRates": null,
+    "maximumLiveCalls": null,
+    "maximumRetentionDays": null,
+    "approvedSpendLimit": null,
+    "pricingSourcesAndTimestamp": null
+  },
+  "data": {
+    "syntheticOnly": true,
+    "approvedDocumentIds": [],
+    "residency": null,
+    "uploadsApproved": false,
+    "extendParseApproved": false,
+    "jevProcessingApproved": false
+  },
+  "approval": {
+    "azureMutationsApproved": false,
+    "entraMutationsApproved": false,
+    "roleAssignmentsApproved": false,
+    "billableQueriesApproved": false,
+    "cleanupApproved": false
+  },
+  "liveVerification": {
+    "nativeAclSpike": "not-run",
+    "nativeMcpSchema": "not-inspected",
+    "twoUserConsent": "pending",
+    "hybridLowExtractive": "not-run",
+    "parsedSyntheticPdf": "not-run",
+    "genuineJevFiling": "not-run",
+    "rawVsCuratedMeasurements": "not-run"
+  }
+}

@@ -2,9 +2,12 @@ import { createApp } from "./app";
 import { resolve } from "node:path";
 import express from "express";
 import { queues } from "./jobs";
+import { createFoundryApp } from "./foundry/app";
 const port = Number(process.env.PORT ?? 4310);
 const origin = process.env.APP_ORIGIN ?? `http://localhost:${port}`;
-const runtime = await createApp({
+const runtime = process.env.JEVBOX_PROFILE === "foundry-iq" ? await createFoundryApp({
+  origin, workers: process.env.NODE_ENV !== "production",
+}) : await createApp({
   directory: resolve(process.env.DATA_DIR ?? ".data"),
   origin,
   workers: process.env.NODE_ENV === "production" ? [] : Object.values(queues),
@@ -12,7 +15,7 @@ const runtime = await createApp({
 if (process.env.NODE_ENV === "production") {
   runtime.app.use(express.static(resolve("dist"), { index: false }));
   runtime.app.get("/{*path}", (_req, res) =>
-    res.sendFile(resolve("dist/index.html")),
+    res.sendFile("index.html", { root: resolve("dist") }),
   );
 } else {
   const { createServer } = await import("vite");

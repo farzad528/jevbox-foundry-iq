@@ -41,7 +41,7 @@ export type Settings = DecisionSettings & {
 };
 export type Fetch = typeof fetch;
 export async function getSettings(
-  store: Store,
+  store: Pick<Store, "one" | "decrypt">,
   orgId: string,
 ): Promise<Settings> {
   const row = await store.one<{
@@ -50,7 +50,12 @@ export async function getSettings(
   if (!row || row.settings === "{}") return {};
   return JSON.parse(store.decrypt(row.settings));
 }
-export function createProviders(store: Store, fetcher: Fetch = fetch) {
+export function createDocumentParser(
+  store: Pick<Store, "one" | "run" | "decrypt"> & {
+    files: { read(kind: "document", id: string): Promise<{ body: Buffer } | undefined> };
+  },
+  fetcher: Fetch = fetch,
+) {
   async function processDocument(
     document: Resource,
     execution?: {
@@ -175,6 +180,10 @@ export function createProviders(store: Store, fetcher: Fetch = fetch) {
     if (run.status !== "PROCESSED") return null;
     return buildIndex(run.output?.chunks, "extend", run.output?.metadata);
   }
+  return processDocument;
+}
+export function createProviders(store: Store, fetcher: Fetch = fetch) {
+  const processDocument = createDocumentParser(store, fetcher);
   async function retrieve(
     actor: Actor,
     query: string,

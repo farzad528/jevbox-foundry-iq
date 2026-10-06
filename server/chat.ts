@@ -20,6 +20,8 @@ import {
   createCitationLocator,
 } from "./citation-sources";
 import { chatTitle, chatTitleLabel } from "../shared/chat-title";
+import { createRunRecorder } from "./run-observability";
+import { runSnapshotSchema, type RunSnapshot } from "../shared/observability";
 import {
   createDocumentVisuals,
   type DocumentPageImage,
@@ -34,6 +36,7 @@ type Message = {
   sources?: unknown[];
   trace?: unknown[];
   retrievalDurationMs?: number;
+  run?: RunSnapshot;
 };
 type Chat = {
   id: string;
@@ -61,6 +64,7 @@ type Turn = {
   error_status: number | null;
   attempt_id: string | null;
   stream: boolean;
+  observability: RunSnapshot | null;
   regenerate_base: string | null;
 };
 const uuid = z.string().uuid();
@@ -215,6 +219,7 @@ export function createChatRuntime(
         selectedModel: t.selected_model,
         error: t.error,
         regenerating: !!t.regenerate_base,
+        ...(t.observability ? { run: runSnapshotSchema.parse(t.observability) } : {}),
       })),
     };
   }
@@ -391,7 +396,15 @@ export function createChatRuntime(
     }, 1000);
     accessCheck.unref();
     let partialWrite: Promise<void> | undefined;
+    const run = createRunRecorder(`${turn.id}:${turn.attempt_id}`, async (snapshot) => {
+      await check();
+      await store.run(
+        "UPDATE chat_turns SET observability=?::jsonb WHERE id=? AND attempt_id=? AND status IN ('retrieving','generating')",
+        JSON.stringify(snapshot), turn.id, turn.attempt_id,
+      );
+    });
     try {
+      await run.start();
       const { a, chat } = await check();
       await validateInput(a, {
         content: turn.content,
@@ -426,6 +439,7 @@ export function createChatRuntime(
         >,
       ) => {
         if (activeLookups++ === 0) retrievalStarted = performance.now();
+        const span = await run.begin("retrieval");
         try {
           const { a: currentActor } = await check();
           await store.run(
@@ -496,7 +510,9 @@ export function createChatRuntime(
             };
           });
           mergeChain = merged.catch(() => {});
-          return await merged;
+          const output = await merged;
+          await run.end(span, "retrieval");
+          return output;
         } catch (error) {
           controller.abort(error);
           throw error;
@@ -571,6 +587,7 @@ export function createChatRuntime(
         pendingText = text;
         persistPartial();
       };
+      let modelSpan: string | undefined;
       const answer = await providers.answer(
         a.orgId,
         turn.content,
@@ -680,6 +697,23 @@ export function createChatRuntime(
               turn.id,
               turn.attempt_id,
             );
+            modelSpan = await run.begin("model", {
+              provider: turn.selected_model?.provider,
+              model: turn.selected_model?.model,
+              measurementKind: "model-step-with-tools",
+            });
+          },
+          onStepUsage: async (usage) => {
+            if (!modelSpan) throw new Error("Model usage arrived without an observed model step");
+            await run.end(modelSpan, "model", {
+              accountingId: modelSpan, scope: "invocation", origin: "provider",
+              ...(usage.inputTokens === undefined ? {} : { input: usage.inputTokens }),
+              ...(usage.outputTokens === undefined ? {} : { output: usage.outputTokens }),
+              ...(usage.inputTokenDetails?.cacheReadTokens === undefined ? {} : { cacheRead: usage.inputTokenDetails.cacheReadTokens }),
+              ...(usage.inputTokenDetails?.cacheWriteTokens === undefined ? {} : { cacheWrite: usage.inputTokenDetails.cacheWriteTokens }),
+              ...(usage.outputTokenDetails?.reasoningTokens === undefined ? {} : { reasoning: usage.outputTokenDetails.reasoningTokens }),
+            });
+            modelSpan = undefined;
           },
           ...(turn.stream ? { onText } : {}),
         },
@@ -690,6 +724,7 @@ export function createChatRuntime(
         const { chat: current } = await check();
         if (current.messages !== chat.messages)
           throw new HttpError(409, "The conversation changed. Please retry.");
+        await run.finish();
         const messages = [
           ...context,
           {
@@ -709,6 +744,7 @@ export function createChatRuntime(
               retrievalDurationMs === undefined
                 ? undefined
                 : Math.round(retrievalDurationMs),
+            run: run.snapshot(),
           },
         ];
         await store.run(
@@ -739,17 +775,24 @@ export function createChatRuntime(
         controller.signal.reason instanceof HttpError
           ? controller.signal.reason
           : error;
+      await store.transaction(async () => {
+      const current = await store.one<Turn>("SELECT * FROM chat_turns WHERE id=? AND attempt_id=? FOR UPDATE", turn.id, turn.attempt_id);
+      if (!current || !["retrieving", "generating", "cancelling"].includes(current.status)) return;
       await store.run(
-        "UPDATE chat_turns SET status=CASE WHEN status='cancelling' THEN 'cancelled' ELSE 'failed' END,error=?,error_status=?,attempt_id=NULL WHERE id=? AND attempt_id=? AND status IN ('retrieving','generating','cancelling')",
+        "UPDATE chat_turns SET status=CASE WHEN status='cancelling' THEN 'cancelled' ELSE 'failed' END,error=?,error_status=?,observability=?::jsonb,attempt_id=NULL WHERE id=? AND attempt_id=? AND status IN ('retrieving','generating','cancelling')",
         reason instanceof HttpError
           ? reason.message
           : controller.signal.aborted
             ? "The answer was interrupted. Retry when you are ready."
             : "The answer could not be completed. Please retry.",
         reason instanceof HttpError ? reason.status : 502,
+        JSON.stringify(run.failedSnapshot(current.status === "cancelling",
+          reason instanceof HttpError && reason.status === 401 ? "authentication-required" :
+          reason instanceof HttpError && [403, 409].includes(reason.status) ? "access-changed" : "provider-error")),
         turn.id,
         turn.attempt_id,
       );
+      });
     } finally {
       while (partialWrite) await partialWrite;
       clearInterval(accessCheck);
@@ -777,7 +820,7 @@ export function createChatRuntime(
       if (candidate.status !== "queued") return;
       const attempt = randomUUID();
       await store.run(
-        "UPDATE chat_turns SET status='retrieving',attempt_id=?,job_id=?,error=NULL,error_status=NULL,partial_text='' WHERE id=?",
+        "UPDATE chat_turns SET status='retrieving',attempt_id=?,job_id=?,error=NULL,error_status=NULL,partial_text='',observability=NULL WHERE id=?",
         attempt,
         job.id,
         candidate.id,

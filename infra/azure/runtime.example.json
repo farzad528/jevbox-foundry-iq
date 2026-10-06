@@ -1,0 +1,30 @@
+{
+  "knowledge": {
+    "tenantId": null,
+    "roster": [],
+    "workspaceId": null,
+    "searchEndpoint": null,
+    "indexName": null,
+    "knowledgeSourceName": null,
+    "knowledgeBaseName": null,
+    "modelEndpoint": null,
+    "projectEndpoint": null,
+    "answerDeployment": null,
+    "embeddingDeployment": null,
+    "embeddingDimensions": null
+  },
+  "databaseSchema": "fiq_poc",
+  "workspaceName": "Synthetic knowledge drive",
+  "agentName": null,
+  "entraClientId": null,
+  "readerClientId": null,
+  "writerClientId": null,
+  "projectClientId": null,
+  "approvals": {
+    "entraConsent": false,
+    "cloudCalls": false,
+    "syntheticUploads": false,
+    "vendorProcessing": false
+  },
+  "nativeProof": null
+}
