@@ -28,6 +28,8 @@ playwright-report/
 *.runtime.local.json
 *.native-proof.local.json
 *.msal-cache*
+*.spike.local.json
+foundry-spike-private/
 
 .terraform/
 *.tfstate*

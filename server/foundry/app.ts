@@ -1,7 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from "express";
 import { randomUUID } from "node:crypto";
 import multer from "multer";
-import { PgBoss } from "pg-boss";
 import { z } from "zod";
 import { loadRuntimeConfig, activationBlockers, type RuntimeConfig } from "./runtime-config";
 import { createFoundryDatabase, type KnowledgeDatabase } from "./database";
@@ -19,6 +18,7 @@ import type { ParsedDocument } from "../indexing";
 import type { KnowledgeResource } from "./access";
 import { SourceUnavailableError } from "../../shared/evidence";
 import { fileMime } from "../../shared/file-types";
+import { createNativeQueueRuntime } from "./queue-runtime";
 
 const resourceName = z.string().trim().min(1).max(160).refine((name) => !/[\x00-\x1f/\\]/.test(name) && ![".", ".."].includes(name));
 const sourceMime = (file: Express.Multer.File) => {
@@ -59,7 +59,7 @@ export async function createFoundryApp(options: { origin: string; databaseUrl?: 
   const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
   if (!databaseUrl || !encryptionKey) throw new Error("An isolated DATABASE_URL and ENCRYPTION_KEY are required");
   const store = await createFoundryDatabase(databaseUrl, config.databaseSchema, encryptionKey);
-  let boss: PgBoss | undefined;
+  let queueRuntime: Awaited<ReturnType<typeof createNativeQueueRuntime>> | undefined;
   try {
     const auth = createEntraAuth({
       tenantId: config.knowledge.tenantId, roster: config.knowledge.roster,
@@ -85,19 +85,9 @@ export async function createFoundryApp(options: { origin: string; databaseUrl?: 
         await store.run("INSERT INTO members(org_id,user_id,role) VALUES(?,?,'member') ON CONFLICT DO NOTHING", config.knowledge.workspaceId, oid);
       }
     });
-    boss = new PgBoss({ connectionString: databaseUrl, schema: `${config.databaseSchema}_native_jobs`,
-      application_name: "jevbox-native-jobs", max: 3 });
-    boss.on("error", () => console.error("Native background queue unavailable"));
-    await boss.start();
-    for (const queue of ["knowledge-sync", "knowledge-request"]) await boss.createQueue(queue, {
-      retryLimit: 5, retryDelay: 15, retryBackoff: true, expireInSeconds: 300, heartbeatSeconds: 30,
-    });
-    const queue = boss;
-    const enqueue = async (kind: "sync" | "request", id: string) => {
-      const result = await queue.send(kind === "sync" ? "knowledge-sync" : "knowledge-request", { id },
-        { singletonKey: id, db: { executeSql: store.executeSql } });
-      if (!result) throw new HttpError(503, "Durable native work could not be queued");
-    };
+    queueRuntime = await createNativeQueueRuntime({ databaseUrl, databaseSchema: config.databaseSchema, store });
+    const queue = queueRuntime;
+    const { enqueue } = queue;
     const engine = createKnowledgeEngine({
       store, config, auth, enqueue,
       iq: createIqClient(config.knowledge, credentials.reader),
@@ -122,21 +112,12 @@ export async function createFoundryApp(options: { origin: string; databaseUrl?: 
       },
     });
     if (options.workers !== false) {
-      await queue.work<{ id: string }>("knowledge-sync", { includeMetadata: true }, async (jobs) => {
-        for (const job of jobs) await engine.sync(job.data.id, job.signal);
-      });
-      await queue.work<{ id: string }>("knowledge-request", { includeMetadata: true }, async (jobs) => {
-        for (const job of jobs) await engine.executeRequest(job.data.id, job.signal);
-      });
-      for (const row of await store.all<{ id: string }>("SELECT id FROM knowledge_outbox WHERE state IN ('pending','failed') OR (state='working' AND lease_until<now())"))
-        await enqueue("sync", row.id);
-      for (const row of await store.all<{ id: string }>("SELECT id FROM knowledge_requests WHERE state='queued' OR (state='working' AND lease_until<now())"))
-        await enqueue("request", row.id);
+      await queue.startWorkers(engine);
     }
     mountFoundryRoutes(app, { config, store, auth, engine, enqueue });
-    return { app, activated: true, closeStreams() {}, async close() { await queue.stop({ graceful: true, timeout: 30000 }); await store.close(); } };
+    return { app, activated: true, closeStreams() {}, async close() { await queue.stop(); await store.close(); } };
   } catch (error) {
-    await boss?.stop({ graceful: false });
+    await queueRuntime?.stop(false);
     await store.close();
     throw error;
   }

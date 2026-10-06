@@ -25,8 +25,11 @@ export const foundryConfigSchema = z.strictObject({
   knowledgeBaseName: name,
   modelEndpoint: azureEndpoint(".openai.azure.com"),
   projectEndpoint: projectEndpointSchema,
+  planningDeployment: name,
+  planningModelName: z.string().min(1).max(100),
   answerDeployment: name,
   embeddingDeployment: name,
+  embeddingModelName: z.string().min(1).max(100),
   embeddingDimensions: z.number().int().positive().max(4096),
 });
 export type FoundryConfig = z.infer<typeof foundryConfigSchema>;

@@ -1,0 +1,20 @@
+{
+  "runtime": null,
+  "origin": "http://localhost:4388",
+  "approval": {
+    "approvedBy": null,
+    "signIn": false,
+    "nativeQueries": false,
+    "modelProbes": false,
+    "syntheticOnly": true,
+    "expiresAt": null
+  },
+  "maxRequests": 80,
+  "waitForExpiredSource": false,
+  "evidence": [],
+  "publicKey": null,
+  "privateRawKey": null,
+  "privateWikiKey": null,
+  "definitionReadback": null,
+  "wrongTenant": null
+}

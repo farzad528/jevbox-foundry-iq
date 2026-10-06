@@ -199,7 +199,8 @@ export function createKnowledgeEngine(input: {
       const row = await store.one<KnowledgeRequest>("SELECT * FROM knowledge_requests WHERE id=? AND workspace_id=? AND user_oid=?", id, knowledge.workspaceId, identity.objectId);
       if (!row) throw new HttpError(404, "Run unavailable");
       assertSourceAccess(identity, knowledge.workspaceId, row.dependencies, await lifecycle.sources(knowledge.workspaceId));
-      return { id: row.id, kind: row.kind, state: row.state, result: row.result, run: row.observability, errorCode: row.error_code };
+      return { id: row.id, kind: row.kind, state: row.state, result: row.result, run: row.observability, errorCode: row.error_code,
+        evidenceMode: row.kind === "native-agent" ? "native-kb" : questionInputSchema.parse(row.input).scope.contentKind === "raw" ? "raw" : "combined" };
     },
     async cancel(identity: UserIdentity, id: string) {
       const row = await this.request(identity, id);

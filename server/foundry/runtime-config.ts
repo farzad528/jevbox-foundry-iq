@@ -1,8 +1,26 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
-import { foundryConfigSchema } from "./config";
+import { foundryConfigSchema, searchApiVersion } from "./config";
 
-const nativeProofSchema = z.strictObject({
+export const nativeBindingSchema = z.strictObject({
+  apiVersion: z.literal(searchApiVersion),
+  knowledge: foundryConfigSchema,
+  agentName: z.string(),
+  entraClientId: z.uuid(),
+  readerClientId: z.uuid(),
+  writerClientId: z.uuid(),
+  projectClientId: z.uuid(),
+});
+export function nativeBinding(config: {
+  knowledge: z.infer<typeof foundryConfigSchema>; agentName: string;
+  entraClientId: string; readerClientId: string; writerClientId: string; projectClientId: string;
+}) {
+  return nativeBindingSchema.parse({ apiVersion: searchApiVersion, knowledge: config.knowledge,
+    agentName: config.agentName, entraClientId: config.entraClientId, readerClientId: config.readerClientId,
+    writerClientId: config.writerClientId, projectClientId: config.projectClientId });
+}
+export const nativeProofSchema = z.strictObject({
+  binding: nativeBindingSchema,
   verifiedAt: z.iso.datetime(),
   tenantId: z.uuid(),
   roster: z.array(z.uuid()).length(2),
@@ -38,7 +56,8 @@ export const runtimeConfigSchema = z.strictObject({
   if (config.readerClientId === config.writerClientId || config.projectClientId === config.writerClientId)
     context.addIssue({ code: "custom", message: "Ingestion identity must be separate from query/model identities" });
   const proof = config.nativeProof;
-  if (proof && (proof.tenantId !== config.knowledge.tenantId ||
+  if (proof && (JSON.stringify(nativeBinding(config)) !== JSON.stringify(nativeBindingSchema.parse(proof.binding)) ||
+    proof.tenantId !== config.knowledge.tenantId ||
     proof.knowledgeBaseName !== config.knowledge.knowledgeBaseName ||
     proof.projectEndpoint !== config.knowledge.projectEndpoint ||
     [...proof.roster].sort().join() !== [...config.knowledge.roster].sort().join()))

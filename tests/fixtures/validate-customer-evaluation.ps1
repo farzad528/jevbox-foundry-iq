@@ -52,6 +52,11 @@ foreach ($wiki in $pack.wikiScenarios) {
     if ($wikis.ContainsKey($wiki.id)) {
         throw 'Duplicate wiki scenario ID'
     }
+    foreach ($reader in $wiki.ownReaders) {
+        if ($reader -notin $pack.identityBinding.readerLabels) {
+            throw 'Unknown wiki reader label'
+        }
+    }
     $wikis[$wiki.id] = $wiki
     if (@($wiki.rawDependencyIds).Count -eq 0 -or @($wiki.claims).Count -eq 0) {
         throw 'Wiki scenario must have source dependencies and claims'
@@ -90,6 +95,15 @@ foreach ($question in $pack.questions) {
     if (-not $question.id -or -not $question.question -or -not $question.expectedBehavior) {
         throw 'Invalid evaluation question'
     }
+    if ($null -eq $question.readers -or @($question.readers).Count -eq 0) {
+        throw 'Evaluation question requires a reader'
+    }
+    if ($question.expectedBehavior -notin @(
+        'grounded-answer', 'explicitly-not-approved', 'abstain-without-protected-metadata',
+        'abstain', 'grounded-answer-without-instruction-execution', 'grounded-answer-after-real-pdf-parsing'
+    )) {
+        throw 'Unknown evaluation behavior'
+    }
     if ($questionIds.ContainsKey($question.id)) {
         throw 'Duplicate question ID'
     }
@@ -112,6 +126,28 @@ foreach ($question in $pack.questions) {
     foreach ($id in $question.scopeDocumentIds) {
         if (-not $docs.ContainsKey($id)) {
             throw 'Unknown scoped source'
+        }
+        if ($null -ne $question.scopeDocumentIds -and @($question.scopeDocumentIds).Count -gt 0) {
+            foreach ($id in $question.expectedSourceIds) {
+                if ($id -notin $question.scopeDocumentIds) {
+                    throw 'Answer expectation is outside the selected document scope'
+                }
+            }
+        }
+        $sourceSections = @(
+            foreach ($id in $question.expectedSourceIds) {
+                foreach ($line in $docs[$id].lines) {
+                    if ($line.StartsWith('## ')) { $line.Substring(3) }
+                }
+                foreach ($page in $docs[$id].pages) {
+                    foreach ($section in $page.sections) { $section.title }
+                }
+            }
+        )
+        foreach ($section in $question.expectedSections) {
+            if ($section -notin $sourceSections) {
+                throw 'Question section expectation is absent from its original sources'
+            }
         }
     }
     foreach ($page in $question.expectedPages) {

@@ -9,8 +9,11 @@
     "knowledgeBaseName": null,
     "modelEndpoint": null,
     "projectEndpoint": null,
+    "planningDeployment": null,
+    "planningModelName": null,
     "answerDeployment": null,
     "embeddingDeployment": null,
+    "embeddingModelName": null,
     "embeddingDimensions": null
   },
   "databaseSchema": "fiq_poc",

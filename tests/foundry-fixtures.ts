@@ -20,8 +20,11 @@ export const testConfig = {
   knowledgeBaseName: "synthetic-kb",
   modelEndpoint: "https://synthetic-unit-test.openai.azure.com",
   projectEndpoint: "https://synthetic-unit-test.services.ai.azure.com/api/projects/synthetic",
+  planningDeployment: "unselected-planning",
+  planningModelName: "unselected-model",
   answerDeployment: "unselected-chat",
   embeddingDeployment: "unselected-embedding",
+  embeddingModelName: "unselected-embedding",
   embeddingDimensions: 3,
 };
 export const readerIds = (labels: string[]) => labels.map((label) => {

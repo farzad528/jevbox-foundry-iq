@@ -18,6 +18,7 @@ type Me = { identity: UserIdentity; workspaceId: string; workspaceName: string; 
 type DriveResource = Resource & { syncState: string; sourceRevision?: number; aclRevision?: number; knowledge_parse_state: string; knowledge_filing_state: string };
 export type FoundryRun = {
   id: string; state: string; kind: string; errorCode?: string;
+  evidenceMode?: "raw" | "combined" | "native-kb";
   run: RunSnapshot | null; result: { answer?: string; evidence?: Evidence[]; pageId?: string } | null;
 };
 const request = (method: string, body?: unknown) => ({ method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -35,6 +36,7 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
   const [createdBefore, setCreatedBefore] = useState("");
   const [folderIds, setFolderIds] = useState<string[]>([]);
   const [fileTypes, setFileTypes] = useState<NonNullable<SearchFilters["fileTypes"]>>([]);
+  const [evidenceMode, setEvidenceMode] = useState<"raw" | "combined">("combined");
   const [wikiId, setWikiId] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ id: string; locator?: SourceLocator; originals?: { name: string; locator: SourceLocator }[] } | null>(null);
   const refreshVersion = useRef(0);
@@ -98,6 +100,7 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
     await mutate(`/foundry/requests/${kind}`, "POST", { question,
       scope: { workspaceId: me.workspaceId, documentIds: kind === "native-agent" ? [] : selected,
         folderIds: kind === "native-agent" ? [] : folderIds, fileTypes: kind === "native-agent" ? [] : fileTypes,
+        ...(kind === "answer" && evidenceMode === "raw" ? { contentKind: "raw" } : {}),
         ...(kind !== "native-agent" && createdAfter ? { createdAfter } : {}),
         ...(kind !== "native-agent" && createdBefore ? { createdBefore } : {}) }, parentId: null });
     setQuestion("");
@@ -181,7 +184,7 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
                 <h1 className="text-xl font-semibold">{tab === "native-agent" ? "Native Foundry agent consumer" : "Source-cited chat"}</h1>
                 <p className="text-sm text-muted-foreground">{tab === "native-agent" ? "The agent calls the same KB through native knowledge_base_retrieve. No duplicate REST query or fabricated native trace." : "IQ extracts hybrid evidence; the configured Foundry Project model authors one answer. Generated knowledge stays draft until human review."}</p>
                 {runs.filter((run) => run.kind === (tab === "native-agent" ? "native-agent" : "answer")).map((run) => <article key={run.id} className="rounded-lg border p-4">
-                  <small>{run.state}{run.errorCode ? ` · ${run.errorCode}` : ""}</small>
+                  <small>{run.state}{run.errorCode ? ` · ${run.errorCode}` : ""} · {run.kind === "native-agent" ? "Native agent: shared KB (no REST scopes)" : run.evidenceMode === "raw" ? "Raw sources" : "Raw + reviewed knowledge"}</small>
                   {run.result?.answer && <div onClick={(event) => {
                     const target = event.target instanceof Element ? event.target.closest("a") : null;
                     const href = target?.getAttribute("href"); if (!href?.startsWith("#fiq-evidence-")) return;
@@ -191,6 +194,9 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
                   {["queued", "working"].includes(run.state) && <Button variant="ghost" onClick={() => { void mutate(`/foundry/requests/${run.id}`, "DELETE"); }}>Cancel</Button>}
                 </article>)}
                 {tab !== "native-agent" && <fieldset className="rounded border p-3"><legend>Optional document / upload-date scope</legend>
+                  <label className="mb-3 block">Chat evidence mode<select className="ml-2 rounded border bg-background p-2" value={evidenceMode} onChange={(event) => setEvidenceMode(event.target.value === "raw" ? "raw" : "combined")}>
+                    <option value="combined">Raw + reviewed knowledge</option><option value="raw">Raw sources</option>
+                  </select></label>
                   <label className="mr-3">Uploaded after (UTC)<input type="date" value={createdAfter} onChange={(event) => setCreatedAfter(event.target.value)} /></label>
                   <label>Uploaded before, inclusive (UTC)<input type="date" value={createdBefore} onChange={(event) => setCreatedBefore(event.target.value)} /></label>
                   {resources.filter((row) => row.kind === "document" && row.syncState === "verified").map((row) => <label key={row.id} className="mr-4 inline-flex items-center gap-2">

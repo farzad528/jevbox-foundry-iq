@@ -2,9 +2,6 @@ import { z } from "zod";
 import { foundryConfigSchema, searchApiVersion } from "./config";
 
 export const setupConfigSchema = foundryConfigSchema.extend({
-  planningDeployment: z.string().regex(/^[a-z0-9][a-z0-9-]{1,127}$/),
-  planningModelName: z.string().min(1).max(100),
-  embeddingModelName: z.string().min(1).max(100),
   agentName: z.string().regex(/^[a-z0-9][a-z0-9-]{1,127}$/),
   connectionName: z.string().regex(/^[a-z0-9][a-z0-9-]{1,127}$/),
 });

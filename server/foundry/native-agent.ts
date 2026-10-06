@@ -35,12 +35,14 @@ export function createNativeAgentClient(input: {
   agentName: string;
   projectCredential: () => Promise<ServiceCredential>;
   fetcher?: typeof fetch;
+  maxOutputTokens?: number;
 }) {
   const config = foundryConfigSchema.parse(input.config);
   const endpoint = new URL(projectEndpointSchema.parse(input.projectEndpoint));
   if (endpoint.toString().replace(/\/$/, "") !== config.projectEndpoint.replace(/\/$/, ""))
     throw new Error("Native agent must use the configured Foundry project");
   const agentName = z.string().regex(/^[a-zA-Z0-9_.-]{1,128}$/).parse(input.agentName);
+  const maxOutputTokens = z.number().int().min(1).max(4096).optional().parse(input.maxOutputTokens);
   return {
     async invoke(question: string, user: DelegatedCredential, signal: AbortSignal) {
       if (user.identity.tenantId !== config.tenantId || !config.roster.includes(user.identity.objectId))
@@ -57,6 +59,7 @@ export function createNativeAgentClient(input: {
             input: z.string().trim().min(1).max(4000).parse(question),
             agent_reference: { type: "agent_reference", name: agentName },
             structured_inputs: { search_auth_token: delegatedHeader(user) },
+            ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
           }),
         },
       );

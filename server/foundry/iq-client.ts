@@ -49,6 +49,18 @@ export const retrievalScopeSchema = z.strictObject({
   createdAfter: scope.createdAfter, createdBefore: scope.createdBefore,
 }).success, "Invalid upload date range");
 export type RetrievalScope = z.infer<typeof retrievalScopeSchema>;
+export function iqRetrieveRequest(config: FoundryConfig, question: string, scope: RetrievalScope) {
+  return {
+    messages: [{ role: "user", content: [{ type: "text", text: z.string().trim().min(1).max(4000).parse(question) }] }],
+    outputMode: "extractiveData",
+    retrievalReasoningEffort: { kind: "low" },
+    includeActivity: true,
+    knowledgeSourceParams: [{
+      kind: "searchIndex", knowledgeSourceName: config.knowledgeSourceName,
+      includeReferences: true, includeReferenceSourceData: true, filterAddOn: scopeFilter(scope),
+    }],
+  };
+}
 const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
 export function scopeFilter(input: RetrievalScope) {
   const scope = retrievalScopeSchema.parse(input);
@@ -116,18 +128,7 @@ export function createIqClient(
             "x-ms-query-source-authorization": userToken,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            messages: [{ role: "user", content: [{ type: "text", text: question }] }],
-            outputMode: "extractiveData",
-            retrievalReasoningEffort: { kind: "low" },
-            includeActivity: true,
-            knowledgeSourceParams: [{
-              kind: "searchIndex",
-              knowledgeSourceName: config.knowledgeSourceName,
-              includeReferences: true, includeReferenceSourceData: true,
-              filterAddOn: scopeFilter(input.scope),
-            }],
-          }),
+          body: JSON.stringify(iqRetrieveRequest(config, question, input.scope)),
         },
       );
       if (response.status !== 200) {

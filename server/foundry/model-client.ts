@@ -29,8 +29,10 @@ export function createFoundryModels(
   input: FoundryConfig,
   modelCredential: () => Promise<ServiceCredential>,
   fetcher: typeof fetch = fetch,
+  options: { maxOutputTokens?: number } = {},
 ) {
   const config = foundryConfigSchema.parse(input);
+  const maxOutputTokens = z.number().int().min(1).max(4096).optional().parse(options.maxOutputTokens);
   const request = async (path: string, body: unknown, signal: AbortSignal) => {
     const response = await fetcher(`${config.projectEndpoint.replace(/\/$/, "")}/openai/v1/${path}`, {
       method: "POST", redirect: "error",
@@ -62,6 +64,7 @@ export function createFoundryModels(
         json_schema: { name: "grounded_output", strict: true, schema: z.toJSONSchema(schema) },
       },
       stream: false,
+      ...(maxOutputTokens === undefined ? {} : { max_completion_tokens: maxOutputTokens }),
     }, signal));
     const choice = response.choices[0];
     if (choice.finish_reason !== "stop" || choice.message.refusal || !choice.message.content)

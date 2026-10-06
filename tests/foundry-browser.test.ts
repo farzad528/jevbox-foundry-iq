@@ -59,7 +59,8 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
       ] });
     let revoked = false;
     let readOnly = false;
-    const submitted: { question: string; scope: { folderIds: string[]; fileTypes: string[]; createdBefore?: string } }[] = [];
+    const submitted: { question: string; scope: { folderIds: string[]; fileTypes: string[]; createdBefore?: string; contentKind?: string } }[] = [];
+    const nativeSubmitted: typeof submitted = [];
     await page.route(`${origin}/api/**`, async (route) => {
       const request = route.request(), path = new URL(request.url()).pathname;
       const answer = (value: unknown, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
@@ -80,10 +81,14 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
       if (path === `/api/foundry/wiki/${pageId}`) return answer(revoked ? { error: "Source access changed" } : wiki, revoked ? 409 : 200);
       if (path === "/api/foundry/requests") return answer(revoked ? [] : [{
         id: runId, kind: "answer", state: "completed", run,
+        evidenceMode: submitted.at(-1)?.scope.contentKind === "raw" ? "raw" : "combined",
         result: { answer: `Synthetic launch is October 15 [${evidence.indexKey}]`, evidence: [evidence] },
       }]);
       if (path === "/api/foundry/requests/answer") {
         submitted.push(request.postDataJSON()); return answer({ id: runId }, 202);
+      }
+      if (path === "/api/foundry/requests/native-agent") {
+        nativeSubmitted.push(request.postDataJSON()); return answer({ id: runId }, 202);
       }
       if (path.startsWith("/api/foundry/citations/")) return answer({ originals: [{ name: resource.name, locator: evidence.locator }] });
       return answer({ error: "Unsupported offline UI fixture operation" }, 410);
@@ -115,6 +120,23 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
     assert.deepEqual(submitted[0].scope.folderIds, [folderId]);
     assert.deepEqual(submitted[0].scope.fileTypes, ["text"]);
     assert.equal(submitted[0].scope.createdBefore, "2026-10-06");
+    assert.equal(submitted[0].scope.contentKind, undefined);
+    await page.getByLabel("Chat evidence mode").selectOption("raw");
+    await page.getByLabel("Question / draft topic").fill("When is launch?");
+    await page.getByRole("button", { name: "Ask IQ + Foundry" }).click();
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>("#foundry-question")?.value === "");
+    assert.equal(submitted[1].scope.contentKind, "raw");
+    assert.deepEqual({ ...submitted[1].scope, contentKind: undefined }, { ...submitted[0].scope, contentKind: undefined });
+    assert(await page.getByText("completed · Raw sources", { exact: true }).isVisible());
+    await page.getByRole("button", { name: "native agent", exact: true }).click();
+    assert.equal(await page.getByLabel("Chat evidence mode").count(), 0);
+    await page.getByLabel("Question / draft topic").fill("When is launch?");
+    await page.getByRole("button", { name: "Ask native agent", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>("#foundry-question")?.value === "");
+    assert.equal(nativeSubmitted[0].scope.contentKind, undefined);
+    assert.deepEqual(nativeSubmitted[0].scope.folderIds, []);
+    assert.deepEqual(nativeSubmitted[0].scope.fileTypes, []);
+    await page.getByRole("button", { name: "chat", exact: true }).click();
     await page.getByRole("link", { name: "source", exact: true }).click();
     await page.getByText("Replace synthetic source", { exact: true }).waitFor();
     assert.equal(await page.locator("aside").count(), 2);

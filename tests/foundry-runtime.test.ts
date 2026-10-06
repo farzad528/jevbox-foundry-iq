@@ -13,7 +13,7 @@ import { createFoundryModels } from "../server/foundry/model-client";
 import { createSearchWriter, indexDocument } from "../server/foundry/search-index";
 import { createNativeAgentClient } from "../server/foundry/native-agent";
 import { DelegatedCredential } from "../server/foundry/credentials";
-import { runtimeConfigSchema } from "../server/foundry/runtime-config";
+import { runtimeConfigSchema, nativeBinding } from "../server/foundry/runtime-config";
 import { createEntraAccess } from "../server/foundry/access";
 import { HttpError } from "../server/errors";
 import { testConfig, testOids, evaluation } from "./foundry-fixtures";
@@ -89,11 +89,13 @@ test("OFFLINE HTTP router + full PostgreSQL migrations + durable IQ/wiki/ACL/nat
       tenantId: testConfig.tenantId, audience: "https://search.azure.com", issuer: "https://offline.synthetic.invalid/issuer",
       delegatedScope: "user_impersonation", roster: testConfig.roster, key: async () => keys.publicKey }));
   }
-  const config = runtimeConfigSchema.parse({
+  const configInput = {
     knowledge: testConfig, databaseSchema: "fiq_offline", workspaceName: "Offline synthetic", agentName: "offline-agent",
     entraClientId: randomUUID(), readerClientId: randomUUID(), writerClientId: randomUUID(), projectClientId: randomUUID(),
     approvals: { entraConsent: true, cloudCalls: true, syntheticUploads: true, vendorProcessing: false },
-    nativeProof: { verifiedAt: new Date().toISOString(), tenantId: testConfig.tenantId, roster: testConfig.roster,
+  };
+  const config = runtimeConfigSchema.parse({ ...configInput,
+    nativeProof: { binding: nativeBinding(configInput), verifiedAt: new Date().toISOString(), tenantId: testConfig.tenantId, roster: testConfig.roster,
       knowledgeBaseName: testConfig.knowledgeBaseName, projectEndpoint: testConfig.projectEndpoint,
       checks: { restTwoUserAcl: true, restAdverseTokens: true, mcpTwoUserAcl: true, mcpAdverseTokens: true,
         mcpOriginalLocators: true, hybridLowExtractive: true, projectModelDeployments: true } },
@@ -344,6 +346,20 @@ test("OFFLINE HTTP router + full PostgreSQL migrations + durable IQ/wiki/ACL/nat
       await processQueue("request");
       assert.deepEqual((await (await http(`/foundry/requests/${noMatchId}`)).json()).result, { answer: "I don't know", evidence: [] });
       assert.equal(calls.filter((call) => call.url.endsWith("/chat/completions")).length, models);
+    });
+    await t.test("raw-only comparison excludes published wiki context and persists the selected mode without changing other scopes", async () => {
+      assert([...nativeIndex.values()].some((unit) => unit.contentKind === "wiki"));
+      const posted = await post("/foundry/requests/answer", { question: "When is release?", scope: { ...scope, contentKind: "raw" } });
+      const id = (await posted.json()).id;
+      await processQueue("request");
+      const result = await (await http(`/foundry/requests/${id}`)).json();
+      assert.equal(result.evidenceMode, "raw");
+      assert(result.result.evidence.every((unit: Evidence) => unit.contentKind === "raw"));
+      const body = calls.filter((call) => call.url.endsWith("/chat/completions")).at(-1)!.body;
+      const messages = z.array(z.object({ content: z.string() })).parse(body.messages);
+      const supplied = z.object({ evidence: z.array(z.object({ id: z.string() })) }).parse(JSON.parse(messages[1].content));
+      assert(supplied.evidence.length > 0);
+      assert(supplied.evidence.every((unit) => nativeIndex.get(unit.id)?.contentKind === "raw"));
     });
     await t.test("nested subtree deletion fences all folders, pending sources and unpublished wiki locations without breaking unrelated listing", async () => {
       const root = (await (await post("/foundry/folders", { name: "Delete root", parentId: null, access: "restricted" })).json()).id;
