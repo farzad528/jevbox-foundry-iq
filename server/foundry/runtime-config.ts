@@ -51,6 +51,10 @@ export const runtimeConfigSchema = z.strictObject({
     syntheticUploads: z.boolean(),
     vendorProcessing: z.boolean(),
   }),
+  imports: z.strictObject({
+    selectedDataApproved: z.boolean(),
+    googleDriveApproved: z.boolean(),
+  }).optional(),
   nativeProof: nativeProofSchema.nullable(),
 }).superRefine((config, context) => {
   if (config.readerClientId === config.writerClientId || config.projectClientId === config.writerClientId)

@@ -19,6 +19,7 @@ import { HttpError } from "../server/errors";
 import { testConfig, testOids, evaluation } from "./foundry-fixtures";
 import { evidenceSchema, type Evidence } from "../shared/evidence";
 import { runSnapshotSchema } from "../shared/observability";
+import { mountSelectedImports } from "../server/foundry/selected-imports";
 
 async function postgres() {
   const db = new PGlite();
@@ -93,6 +94,7 @@ test("OFFLINE HTTP router + full PostgreSQL migrations + durable IQ/wiki/ACL/nat
     knowledge: testConfig, databaseSchema: "fiq_offline", workspaceName: "Offline synthetic", agentName: "offline-agent",
     entraClientId: randomUUID(), readerClientId: randomUUID(), writerClientId: randomUUID(), projectClientId: randomUUID(),
     approvals: { entraConsent: true, cloudCalls: true, syntheticUploads: true, vendorProcessing: false },
+    imports: { selectedDataApproved: true, googleDriveApproved: false },
   };
   const config = runtimeConfigSchema.parse({ ...configInput,
     nativeProof: { binding: nativeBinding(configInput), verifiedAt: new Date().toISOString(), tenantId: testConfig.tenantId, roster: testConfig.roster,
@@ -240,7 +242,8 @@ test("OFFLINE HTTP router + full PostgreSQL migrations + durable IQ/wiki/ACL/nat
   });
   const app = express();
   app.use(express.json());
-  mountFoundryRoutes(app, { store, config, auth, engine, enqueue: async (kind, id) => { queued.push({ kind, id }); } });
+  mountFoundryRoutes(app, { store, config, auth, engine, origin: "http://localhost:4387",
+    enqueue: async (kind, id) => { queued.push({ kind, id }); } });
   const server = await localServer(app);
   const http = (path: string, options: RequestInit = {}, oid = testOids.A) => {
     const headers = new Headers({ "X-Offline-User": oid, "Content-Type": "application/json", ...options.headers });
@@ -483,6 +486,174 @@ test("OFFLINE HTTP router + full PostgreSQL migrations + durable IQ/wiki/ACL/nat
       bothUsers = true;
       await engine.sync(queuedJob.id, new AbortController().signal);
       assert.equal((await engine.lifecycle.sources(testConfig.workspaceId)).get(documentId)?.state, "verified");
+    });
+    await t.test("selected local import preserves folders, private ACLs, original IDs and guarded source revisions without extra retrieval", async () => {
+      const importLocal = (text: string, connectionId?: string, oid = testOids.A, paths = ["Cedar/Operations/policy.md"]) => {
+        const form = new FormData();
+        for (const path of paths) form.append("files", new Blob([text]), path.split("/").at(-1)!);
+        form.append("manifest", JSON.stringify({ paths, ...(connectionId ? { connectionId } : {}) }));
+        return http("/foundry/imports/local", { method: "POST", body: form }, oid);
+      };
+      assert.equal((await importLocal("bad", undefined, testOids.A, ["Cedar/../policy.md"])).status, 400);
+      assert.equal((await importLocal("x".repeat(8 * 1024 * 1024 + 1))).status, 413);
+      const count = calls.length;
+      const receipt = await importLocal("# Policy\n\nSynthetic launch.", undefined, testOids.A, ["Cedar/Operations/policy.md", "Cedar/image.png"]);
+      assert.equal(receipt.status, 202);
+      const imported = await receipt.json();
+      const id = imported.results[0].id;
+      assert.equal(imported.results[0].state, "pending");
+      assert.equal(imported.results[1].state, "failed");
+      assert.equal(calls.length, count, "Import enqueues only; it does not retrieve or call models");
+      assert.equal((await http(`/foundry/origins/${id}`)).status, 409);
+      const pending = await (await http("/foundry/connections")).json();
+      assert.equal(pending.knowledgeBaseName, testConfig.knowledgeBaseName);
+      assert.equal((await engine.access.resource(pending.connections[0].rootId)).kind, "folder");
+      const item = pending.connections[0].items[0];
+      assert.equal(item.id, id); assert.equal(item.name, undefined);
+      assert.deepEqual((await (await http("/foundry/connections", {}, testOids.B)).json()).connections, []);
+      assert.equal((await importLocal("not allowed", imported.connectionId, testOids.B)).status, 404);
+      const resource = await engine.access.resource(id);
+      const ancestors = await engine.access.bounds(id);
+      assert.deepEqual(ancestors.map((row) => row.name), ["policy.md", "Operations", "Cedar"]);
+      assert(ancestors.at(-1)!.pinned && resource.knowledge_manual);
+      await processQueue("sync");
+      const ready = await (await http("/foundry/connections")).json();
+      assert.equal(ready.connections[0].rootId, pending.connections[0].rootId);
+      assert.equal(ready.connections[0].items[0].state, "verified");
+      assert.equal(ready.connections[0].items[0].name, "policy.md");
+      assert.equal((await http(`/foundry/origins/${id}`, {}, testOids.B)).status, 404);
+      assert.equal((await (await http(`/foundry/origins/${id}`)).json()).path, "Cedar/Operations/policy.md");
+      const before = (await store.all("SELECT id FROM knowledge_outbox")).length;
+      const unchanged = await (await importLocal("# Policy\n\nSynthetic launch.", imported.connectionId)).json();
+      assert.equal(unchanged.results[0].id, id);
+      assert.equal(unchanged.results[0].state, "unchanged");
+      assert.equal((await store.all("SELECT id FROM knowledge_outbox")).length, before);
+      const changed = await (await importLocal("# Policy\n\nChanged launch.", imported.connectionId)).json();
+      assert.equal(changed.results[0].id, id);
+      assert.equal(changed.results[0].state, "pending");
+      assert.equal((await http(`/resources/${id}`)).status, 409);
+      assert.equal((await http(`/foundry/origins/${id}`)).status, 409);
+      const states = await engine.lifecycle.sources(testConfig.workspaceId);
+      assert.equal(states.get(id)?.sourceRevision, 2);
+      const outbox = await store.one<{ session_id: string }>("SELECT session_id FROM knowledge_outbox WHERE document_id=? ORDER BY generation DESC LIMIT 1", id);
+      assert.equal(outbox?.session_id, sessionIds.get(testOids.A));
+      await processQueue("sync");
+      const replacement = new FormData(); replacement.append("file", new Blob(["Manual replacement"]), "policy.md");
+      assert.equal((await http(`/foundry/documents/${id}`, { method: "PUT", body: replacement })).status, 202);
+      const restored = await (await importLocal("# Policy\n\nChanged launch.", imported.connectionId)).json();
+      assert.equal(restored.results[0].state, "pending", "Manual replacement cannot fool unchanged detection");
+      assert.equal((await engine.lifecycle.sources(testConfig.workspaceId)).get(id)?.sourceRevision, 4);
+      await processQueue("sync");
+      assert.equal((await engine.lifecycle.sources(testConfig.workspaceId)).get(id)?.state, "verified");
+      const retryCount = (await store.all("SELECT id FROM knowledge_outbox")).length;
+      await store.run("UPDATE knowledge_source_state SET state='failed' WHERE document_id=?", id);
+      const retry = await (await importLocal("# Policy\n\nChanged launch.", imported.connectionId)).json();
+      assert.equal(retry.results[0].state, "pending");
+      assert.equal((await engine.lifecycle.sources(testConfig.workspaceId)).get(id)?.sourceRevision, 4);
+      assert.equal((await store.all("SELECT id FROM knowledge_outbox")).length, retryCount + 1);
+      await processQueue("sync");
+      const changedMime = new FormData(); changedMime.append("file", new Blob(["# Policy\n\nChanged launch."]), "policy.txt");
+      assert.equal((await http(`/foundry/documents/${id}`, { method: "PUT", body: changedMime })).status, 202);
+      const rebound = await (await importLocal("# Policy\n\nChanged launch.", imported.connectionId)).json();
+      assert.equal(rebound.results[0].state, "pending", "Equal bytes with a different MIME type are not an unchanged original");
+      assert.equal((await engine.lifecycle.sources(testConfig.workspaceId)).get(id)?.sourceRevision, 6);
+      await processQueue("sync");
+    });
+    await t.test("individual local files use a private collection root and the same real migration/outbox lifecycle", async () => {
+      const form = new FormData();
+      form.append("files", new Blob(["# Synthetic loose file"]), "notes.md");
+      form.append("manifest", JSON.stringify({ paths: ["Local files/notes.md"] }));
+      const response = await http("/foundry/imports/local", { method: "POST", body: form });
+      assert.equal(response.status, 202);
+      const receipt = await response.json();
+      const id = receipt.results[0].id;
+      const before = await (await http("/foundry/connections")).json();
+      const collection = before.connections.find((item: { id: string }) => item.id === receipt.connectionId);
+      assert(collection);
+      assert.equal(collection.label, "Local files");
+      assert.equal(collection.items[0].name, undefined);
+      assert.equal((await engine.access.resource(id)).parent_id, collection.rootId);
+      assert.deepEqual(await engine.access.readers(id), [testOids.A]);
+      assert(!(await (await http("/foundry/connections", {}, testOids.B)).json()).connections
+        .some((item: { rootId: string }) => item.rootId === collection.rootId));
+      await processQueue("sync");
+      assert.equal((await (await http(`/resources/${id}`)).json()).syncState, "verified");
+      assert.equal((await (await http(`/foundry/origins/${id}`)).json()).path, "Local files/notes.md");
+    });
+    await t.test("synthetic-upload permission does not authorize selected customer imports", async () => {
+      const locked = express(); locked.use(express.json());
+      mountSelectedImports(locked, { config: { ...config, imports: undefined }, store, auth, engine, origin: "http://localhost:4387", env: {} });
+      locked.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) =>
+        res.status(error instanceof HttpError ? error.status : 500).json({ error: error instanceof Error ? error.message : "failed" }));
+      const local = await localServer(locked);
+      try {
+        const before = (await store.all("SELECT id FROM knowledge_import_connections")).length;
+        const response = await fetch(`${local.origin}/api/foundry/google/start`, {
+          method: "POST", headers: { "X-Offline-User": testOids.A, "Content-Type": "application/json" }, body: "{}",
+        });
+        assert.equal(response.status, 403);
+        assert.equal((await store.all("SELECT id FROM knowledge_import_connections")).length, before);
+      } finally { await local.close(); }
+    });
+    await t.test("OFFLINE Google selection callback never imports; explicit import feeds the same guarded outbox and provenance", async () => {
+      let downloads = 0;
+      const googleApp = express(); googleApp.use(express.json());
+      mountSelectedImports(googleApp, { config: { ...config, imports: { selectedDataApproved: true, googleDriveApproved: true } },
+        store, auth, engine, origin: "http://localhost:4387",
+        env: { GOOGLE_DRIVE_CLIENT_ID: "offline-client", GOOGLE_DRIVE_CLIENT_SECRET: "offline-not-real" },
+        googleFetch: async (url, options) => {
+          const target = new URL(String(url));
+          if (target.href === "https://oauth2.googleapis.com/token") return Response.json({
+            access_token: "synthetic-google", token_type: "Bearer", expires_in: 3600, scope: "https://www.googleapis.com/auth/drive.file",
+          });
+          assert.equal(target.origin, "https://www.googleapis.com", "Unexpected external traffic blocked");
+          assert.equal(new Headers(options?.headers).get("Authorization"), "Bearer synthetic-google");
+          if (target.pathname.endsWith("/export")) { downloads++; return new Response("Synthetic Google source"); }
+          assert.equal(target.pathname, "/drive/v3/files/offline_google_id");
+          return Response.json({ id: "offline_google_id", name: "Google policy", mimeType: "application/vnd.google-apps.document",
+            version: "3", capabilities: { canDownload: true } });
+        },
+      });
+      googleApp.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) =>
+        res.status(error instanceof HttpError ? error.status : 500).json({ error: error instanceof Error ? error.message : "failed" }));
+      const googleServer = await localServer(googleApp);
+      const request = (path: string, method = "GET", body?: unknown) => fetch(googleServer.origin + "/api/foundry" + path, {
+        method, redirect: "manual", headers: { "Content-Type": "application/json", "X-Offline-User": testOids.A },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      try {
+        const url = new URL((await (await request("/google/start", "POST", {})).json()).url);
+        const callback = await request(`/google/callback?${new URLSearchParams({
+          state: url.searchParams.get("state")!, code: "synthetic-code", picked_file_ids: "offline_google_id",
+        })}`);
+        assert.equal(callback.status, 302); assert.equal(downloads, 0);
+        assert.equal((await (await request("/connections")).json()).selection[0].name, "Google policy");
+        const count = calls.length;
+        const receipt = await request("/imports/google", "POST", { confirm: true });
+        assert.equal(receipt.status, 202);
+        const result = await receipt.json();
+        assert.equal(result.results[0].state, "pending");
+        assert.equal(downloads, 1); assert.equal(calls.length, count);
+        assert.equal((await (await request("/connections")).json()).selection, null);
+        assert.equal((await request("/imports/google", "POST", { confirm: true })).status, 409);
+        const id = result.results[0].id;
+        const pending = await (await request("/connections")).json();
+        const connection = pending.connections.find((item: { id: string }) => item.id === result.connectionId);
+        assert(connection);
+        assert.equal(connection.provider, "google");
+        assert.equal(connection.items[0].name, undefined);
+        assert.equal(pending.knowledgeBaseName, testConfig.knowledgeBaseName);
+        assert.equal((await engine.access.resource(id)).parent_id, connection.rootId);
+        assert.equal((await http(`/foundry/origins/${id}`)).status, 409);
+        await processQueue("sync");
+        assert.equal((await (await request("/connections")).json()).connections
+          .find((item: { id: string }) => item.id === result.connectionId).items[0].state, "verified");
+        const origin = await (await http(`/foundry/origins/${id}`)).json();
+        assert.equal(origin.version, "3");
+        assert.match(origin.representation, /no original page geometry/);
+        const serialized = JSON.stringify(await store.all("SELECT origin FROM knowledge_import_revisions"));
+        assert(!serialized.includes("synthetic-google") && !serialized.includes("offline-not-real"));
+      } finally { await googleServer.close(); }
     });
   } finally { await server.close(); await db.close(); }
 });

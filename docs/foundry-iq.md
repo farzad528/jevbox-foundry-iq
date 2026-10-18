@@ -6,6 +6,12 @@ Microsoft or Extend product. Reviewed upstream:
 
 ## Delivery and verification boundary
 
+For the customer-first local launcher and selected files/folder/Google Drive import
+journey, see the [customer quickstart](customer-quickstart.md). Those imports use
+this same native-ACL index and lifecycle, not additional knowledge sources.
+Successful selections open their own collection in the existing Jevbox 3D view
+only after native synchronization and a current resource-access recheck.
+
 The guarded local implementation is wired. **The real-Azure PoC is not
 live-verified or activated.** Code approval does not approve Azure/Entra changes,
 consent, uploads, paid calls, external Parse/JEV processing or resource deletion.
@@ -27,6 +33,11 @@ now exercises the extracted production queue runtime and actual engine on
 standalone PostgreSQL with synthetic auth/providers. Seeded lease recovery is
 not OS-kill/power-loss proof or an operational deployment. Browser mock responses
 do not prove backend or Azure authorization.
+
+The newer selected-import migration (`029`) has PGlite/router coverage, not a new
+standalone PostgreSQL result. A subsequent opt-in rerun was blocked before cluster
+startup because the operator-selected `PG_TEST_BIN` no longer contained
+`initdb.exe`. The historical PostgreSQL results above do not verify that migration.
 
 ## Local startup
 

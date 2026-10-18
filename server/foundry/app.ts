@@ -19,6 +19,7 @@ import type { KnowledgeResource } from "./access";
 import { SourceUnavailableError } from "../../shared/evidence";
 import { fileMime } from "../../shared/file-types";
 import { createNativeQueueRuntime } from "./queue-runtime";
+import { mountSelectedImports } from "./selected-imports";
 
 const resourceName = z.string().trim().min(1).max(160).refine((name) => !/[\x00-\x1f/\\]/.test(name) && ![".", ".."].includes(name));
 const sourceMime = (file: Express.Multer.File) => {
@@ -36,6 +37,7 @@ export async function createFoundryApp(options: { origin: string; databaseUrl?: 
   app.use((req, res, next) => {
     res.set("Cache-Control", "no-store");
     res.set("X-Content-Type-Options", "nosniff");
+    res.set("Referrer-Policy", "no-referrer");
     if (!["GET", "HEAD", "OPTIONS"].includes(req.method) &&
       (req.get("Origin") !== options.origin || req.get("X-Jevbox-Request") !== "1"))
       return next(new HttpError(403, "A same-origin application request is required"));
@@ -114,7 +116,7 @@ export async function createFoundryApp(options: { origin: string; databaseUrl?: 
     if (options.workers !== false) {
       await queue.startWorkers(engine);
     }
-    mountFoundryRoutes(app, { config, store, auth, engine, enqueue });
+    mountFoundryRoutes(app, { config, store, auth, engine, enqueue, origin: options.origin });
     return { app, activated: true, closeStreams() {}, async close() { await queue.stop(); await store.close(); } };
   } catch (error) {
     await queueRuntime?.stop(false);
@@ -126,6 +128,7 @@ export async function createFoundryApp(options: { origin: string; databaseUrl?: 
 export function mountFoundryRoutes(app: express.Express, input: {
   config: RuntimeConfig; store: KnowledgeDatabase; auth: KnowledgeAuth & { router: express.Router };
   engine: ReturnType<typeof createKnowledgeEngine>; enqueue: (kind: "sync" | "request", id: string) => Promise<void>;
+  origin: string;
 }) {
     const { config, store, auth, engine, enqueue } = input;
     app.use("/api/entra", auth.router);
@@ -144,6 +147,7 @@ export function mountFoundryRoutes(app: express.Express, input: {
         projectEndpoint: config.knowledge.projectEndpoint, modelDeployment: config.knowledge.answerDeployment,
         vendorProcessingApproved: config.approvals.vendorProcessing, roster: config.knowledge.roster });
     });
+    mountSelectedImports(app, input);
     const describe = async (req: Request, row: KnowledgeResource, includeParsed = false) => {
       const { identity } = await auth.authenticate(req);
       const state = (await engine.lifecycle.sources(config.knowledge.workspaceId)).get(row.id);
@@ -373,6 +377,7 @@ export function mountFoundryRoutes(app: express.Express, input: {
       error: "Legacy password, OAuth/API-key, JEV retrieval, anonymous links and local MCP gateway are disabled in the Entra profile." }));
     app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
       if (error instanceof z.ZodError) return res.status(400).json({ error: "Invalid input or incompatible external contract" });
+      if (error instanceof multer.MulterError) return res.status(413).json({ error: "Import exceeds the file, size or multipart-field limits" });
       if (error instanceof SourceUnavailableError) return res.status(409).json({ error: "Source access, revision or synchronization changed; protected data is unavailable." });
       if (error instanceof HttpError) return res.status(error.status).json({ error: error.message });
       console.error("Foundry application request failed");

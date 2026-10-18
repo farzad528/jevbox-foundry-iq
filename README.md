@@ -1,4 +1,4 @@
-# Jevbox
+# Jevbox + Foundry IQ
 
 ## Foundry IQ fork
 
@@ -7,8 +7,37 @@ reviewed wiki, native Search ACL lifecycle and the existing Jevbox viewers.
 Run `pnpm dev:foundry` for the local setup screen; without approved private
 configuration it starts without database or cloud access and rejects protected
 and legacy paths. See [Foundry IQ setup and verification boundaries](docs/foundry-iq.md).
-The real-Azure PoC is **not live-verified**. The upstream behavior documented
-below remains separately available in the `legacy` profile.
+The real-Azure PoC is **not live-verified**.
+
+## Start on your computer
+
+**Download or clone this fork, then open [`start-foundry.cmd`](start-foundry.cmd)
+on Windows**, or run `node scripts/launch-foundry.ts` on macOS/Linux.
+Requires Node.js 24.6+. The launcher installs pinned repository dependencies when
+missing, starts only the Foundry profile on **http://localhost:4387**, and leaves
+the terminal open. It does not install global programs, start SpiceDB, provision
+Azure, connect accounts or upload files.
+
+The customer journey is **Launch locally → connect an approved Foundry IQ
+environment → connect local files, a folder or Google Drive → ingest → wait for
+verified indexing → explore the imported collection in 3D → ask a question →
+open the original evidence**.
+The **Connect data** screen reviews selected files before import, preserves local
+folder structure, and supports explicit refresh without duplicating unchanged
+documents. Google Drive uses selected-file authorization, not whole-drive access.
+Both sources feed the same configured Foundry IQ knowledge base. Only a fully
+verified, successful selection automatically opens in 3D; partially ready imports
+have an explicit verified-files-only viewing action.
+
+This is **not yet a zero-setup, live-verified demo**: the existing Azure/Entra,
+PostgreSQL and genuine native-proof prerequisites still apply. A GitHub web button
+cannot silently execute a local app or grant account/data-processing consent.
+See the [customer quickstart and exact boundaries](docs/customer-quickstart.md).
+
+## Upstream / legacy Jevbox
+
+The upstream behavior below remains separately available in the `legacy`
+profile. Its deployment button does **not** deploy this fork's Foundry IQ path.
 
 A full stack, permission-aware document library. Browse with Extend UI Finder, inspect document trees and parsed output, share with organization members, search the hierarchy with JEV, and ask source-grounded questions through the AI SDK.
 

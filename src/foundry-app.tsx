@@ -3,7 +3,7 @@ import { api, type Resource } from "./lib/api";
 import type { Evidence, SourceLocator, UserIdentity } from "../shared/evidence";
 import type { RunSnapshot } from "../shared/observability";
 import type { WikiRevision } from "../server/wiki/provenance";
-import { FileSystem, type FileSystemItem } from "./components/extend/file-system";
+import { FileSystem, type FileSystemItem, type FileSystemView } from "./components/extend/file-system";
 import { DocumentView } from "./components/document";
 import { RunConsoleDock } from "./components/run-console";
 import { Markdown } from "./components/common";
@@ -12,10 +12,11 @@ import { useTheme } from "./components/theme";
 import { WikiEditor } from "./components/wiki-editor";
 import { EntraSharing } from "./components/entra-sharing";
 import { searchFiltersSchema, type SearchFilters } from "../shared/search-filters";
+import { ConnectData, ImportedOrigin } from "./components/connect-data";
+import { foundryDrive, type FoundryDriveResource as DriveResource } from "./lib/foundry-drive";
 
 type Profile = { profile: "foundry-iq"; activated: boolean; blockers: string[] };
 type Me = { identity: UserIdentity; workspaceId: string; workspaceName: string; projectEndpoint: string; modelDeployment: string; vendorProcessingApproved: boolean; roster: string[] };
-type DriveResource = Resource & { syncState: string; sourceRevision?: number; aclRevision?: number; knowledge_parse_state: string; knowledge_filing_state: string };
 export type FoundryRun = {
   id: string; state: string; kind: string; errorCode?: string;
   evidenceMode?: "raw" | "combined" | "native-kb";
@@ -28,8 +29,10 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
   const [resources, setResources] = useState<DriveResource[]>([]);
   const [pages, setPages] = useState<WikiRevision[]>([]);
   const [runs, setRuns] = useState<FoundryRun[]>([]);
-  const [tab, setTab] = useState("library");
+  const [tab, setTab] = useState("connect");
   const [path, setPath] = useState("");
+  const [view, setView] = useState<FileSystemView>("spatial");
+  const [setupSource, setSetupSource] = useState<"local" | "google" | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
   const [createdAfter, setCreatedAfter] = useState("");
@@ -40,14 +43,30 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
   const [wikiId, setWikiId] = useState<string | null>(null);
   const [focus, setFocus] = useState<{ id: string; locator?: SourceLocator; originals?: { name: string; locator: SourceLocator }[] } | null>(null);
   const refreshVersion = useRef(0);
+  const navigationVersion = useRef(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [sharing, setSharing] = useState<Resource | null>(null);
   const [stalePages, setStalePages] = useState<{ pageId: string; documentIds: string[] }[]>([]);
   const [pending, setPending] = useState<{ id: string; parse: string; filing: string; nativeSync: string }[]>([]);
   const { dark, toggle } = useTheme();
-  const clear = useCallback(() => { refreshVersion.current++; setResources([]); setPages([]); setRuns([]); setFocus(null); setWikiId(null); setSharing(null); setStalePages([]); setPending([]); setSelected([]); setFolderIds([]); setQuestion(""); }, []);
+  const clear = useCallback(() => { refreshVersion.current++; navigationVersion.current++; setPath(""); setNotice(""); setResources([]); setPages([]); setRuns([]); setFocus(null); setWikiId(null); setSharing(null); setStalePages([]); setPending([]); setSelected([]); setFolderIds([]); setQuestion(""); }, []);
   const fail = useCallback((error: unknown) => { clear(); setError(error instanceof Error ? error.message : "Current authorization could not be verified"); }, [clear]);
+  const navigate = useCallback((next: string) => { navigationVersion.current++; setTab(next); setFocus(null); }, []);
+  const openImported3D = useCallback(async (rootId: string, documentIds: string[]) => {
+    const version = ++navigationVersion.current;
+    const current = await api<DriveResource[]>("/resources", { notify: false });
+    if (version !== navigationVersion.current) return;
+    const drive = foundryDrive(current), rootPath = drive.paths.get(rootId);
+    if (!rootPath || drive.byPath.get(rootPath)?.kind !== "folder" || !documentIds.length || !documentIds.every((id) => {
+      const path = drive.paths.get(id), row = path ? drive.byPath.get(path) : null;
+      return path?.startsWith(rootPath) && row?.kind === "document" && row.syncState === "verified";
+    }))
+      throw new Error("The imported collection is not currently authorized and verified. Check its status before opening 3D.");
+    refreshVersion.current++;
+    setResources(current); setPath(rootId); setView("spatial"); setFocus(null); setTab("library");
+    setNotice("Imported collection verified in Foundry IQ. This is Jevbox’s spatial document view, not a retrieval or embedding graph.");
+  }, []);
   const refresh = useCallback(async () => {
     if (!me) return;
     const version = ++refreshVersion.current;
@@ -60,6 +79,7 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
         api<{ ownerOnlyPending: typeof pending }>("/foundry/status", { notify: false }),
       ]);
       if (version !== refreshVersion.current) return;
+      foundryDrive(nextResources);
       setResources(nextResources); setPages(nextPages); setRuns(nextRuns); setError("");
       setStalePages(nextStale);
       setPending(status.ownerOnlyPending);
@@ -105,14 +125,35 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
         ...(kind !== "native-agent" && createdBefore ? { createdBefore } : {}) }, parentId: null });
     setQuestion("");
   };
-  const items: FileSystemItem[] = resources.map((row) => row.kind === "folder"
-    ? { kind: "folder", path: row.id, parentPath: row.parent_id ?? "", name: row.name, pinned: row.pinned, access: row.access }
-    : { kind: "file", path: row.id, key: row.id, parentPath: row.parent_id ?? "", name: row.name, contentType: row.mime,
-      access: row.access, size: row.size, metadata: { status: row.syncState === "verified" ? "ready" : "processing" } });
+  const drive = foundryDrive(resources);
+  const mutateItem = (item: FileSystemItem, patch: { pinned: boolean } | { parentId: string | null }) => {
+    const row = drive.byPath.get(item.path);
+    if (!row) { fail(new Error("The current library item is no longer available.")); return; }
+    void mutate(`/foundry/resources/${row.id}`, "PATCH", patch);
+  };
   const setup = (
     <section className="mx-auto max-w-3xl space-y-5 p-8">
       <h1 className="text-2xl font-semibold">Jevbox + Foundry IQ</h1>
       <p>Entra-native document drive, source-cited Q&amp;A and human-reviewed knowledge. This fork is not an official Microsoft or Extend product.</p>
+      {(!profile.activated || !me) && <section className="space-y-3 rounded border p-4">
+        <h2 className="font-semibold">Connect your data</h2>
+        <p>Choose a source to see its prerequisites. Actual selection and ingestion require a verified Foundry IQ connection and Entra sign-in.</p>
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={() => setSetupSource("local")}>Connect local files</Button>
+          <Button onClick={() => setSetupSource("google")}>Connect Google Drive</Button>
+        </div>
+        {setupSource && <div role="status">
+          <p>{setupSource === "local" ? "Local files: choose individual files or a folder, review the selection, then approve ingestion."
+            : "Google Drive: configure an approved Google OAuth client, sign in to Google's selected-file picker, then review and approve ingestion."}</p>
+          <p>Complete the prerequisites below first. Nothing has been uploaded or connected. After native indexing and permissions are verified, the imported collection opens in 3D.</p>
+        </div>}
+      </section>}
+      <ol className="grid gap-3 sm:grid-cols-2">
+        <li className="rounded border p-4"><strong>1 · Launch locally</strong><p>The Jevbox UI is running on your computer.</p></li>
+        <li className="rounded border p-4"><strong>2 · Connect Foundry IQ</strong><p>Configure the private Azure environment, Entra consent and genuine native verification. Launching does not provision or authorize services.</p></li>
+        <li className="rounded border p-4"><strong>3 · Select your data</strong><p>Choose local files, a folder or Google Drive files, review the selection, then explicitly ingest into Foundry IQ.</p></li>
+        <li className="rounded border p-4"><strong>4 · Explore in 3D and ask</strong><p>Verified imports open in Jevbox’s 3D view. Ask Foundry IQ and check original evidence. Reviewed wiki knowledge is optional.</p></li>
+      </ol>
       {!profile.activated ? <><h2 className="font-semibold">Activation blocked</h2>
         <ul className="list-disc space-y-2 pl-5">{profile.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
         <p>No legacy login, API-key/MCP gateway, JEV answer retrieval, Azure calls, uploads or vendor processing are enabled in this profile.</p>
@@ -132,7 +173,7 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
     <><div className="flex h-screen bg-background text-foreground">
       <aside className="flex w-56 shrink-0 flex-col gap-3 border-r p-4">
         <strong>Jevbox + Foundry IQ</strong>
-        {["library", "chat", "knowledge", "native-agent", "setup"].map((name) => <Button key={name} variant={tab === name ? "secondary" : "ghost"} onClick={() => { setTab(name); setFocus(null); }}>{name === "knowledge" ? "Knowledge / Wiki" : name.replace("-", " ")}</Button>)}
+        {["connect", "library", "chat", "knowledge", "native-agent", "setup"].map((name) => <Button key={name} variant={tab === name ? "secondary" : "ghost"} onClick={() => navigate(name)}>{name === "connect" ? "Connect data" : name === "knowledge" ? "Knowledge / Wiki" : name.replace("-", " ")}</Button>)}
         <p className="mt-auto break-all text-xs">Entra OID: {me.identity.objectId}</p>
         <Button variant="ghost" onClick={toggle}>{dark ? "Light" : "Dark"} theme</Button>
         <Button variant="ghost" onClick={() => { void mutate("/entra/logout", "POST").then(() => { setMe(null); clear(); }); }}>Sign out</Button>
@@ -143,8 +184,9 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
         <RunConsoleDock runs={activeRuns}>
           <div className="flex h-full min-h-0">
             <div className="min-w-0 flex-1 overflow-auto">
-              {tab === "setup" ? setup : tab === "library" ? <>
+              {tab === "setup" ? setup : tab === "connect" ? <ConnectData onImported={refresh} onError={fail} onNavigate={navigate} onOpen3D={openImported3D} /> : tab === "library" ? <>
                 <div className="flex items-center gap-3 border-b p-3">
+                  <Button onClick={() => navigate("connect")}>Connect data</Button>
                   <label className="cursor-pointer rounded border px-3 py-2">Upload synthetic source
                     <input className="sr-only" type="file" accept=".txt,.md,.json,.pdf" onChange={(event) => {
                       const file = event.target.files?.[0]; if (!file) return;
@@ -158,18 +200,22 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
                   }}>New folder</Button>
                 </div>
                 {pending.length > 0 && <div role="status" className="border-b p-3 text-sm">Owner-only processing status (titles/content are blocked): {pending.map((item) => <p key={item.id}>{item.id} · parse {item.parse} · filing {item.filing} · native {item.nativeSync}</p>)}</div>}
-                <FileSystem items={items} path={path} onPathChange={setPath} title="Synthetic knowledge drive"
+                <FileSystem items={drive.items} path={drive.paths.get(path) ?? ""} onPathChange={(next) => {
+                    const row = drive.byPath.get(next);
+                    if (next && row?.kind !== "folder") { fail(new Error("The current folder is no longer available.")); return; }
+                    setPath(row?.id ?? "");
+                  }} view={view} onViewChange={setView} title="Knowledge drive"
                   onFileOpen={(file) => setFocus({ id: file.key ?? file.path })}
-                  onShare={(item) => setSharing(resources.find((row) => row.id === (item.kind === "file" ? item.key ?? item.path : item.path)) ?? null)}
-                  canShare={(item) => resources.some((row) => row.id === (item.kind === "file" ? item.key ?? item.path : item.path) && row.canShare)}
+                  onShare={(item) => setSharing(drive.byPath.get(item.path) ?? null)}
+                  canShare={(item) => drive.byPath.get(item.path)?.canShare === true}
                   getFileUrl={(file) => `/api/documents/${file.key ?? file.path}/content`}
                   loadDocumentStructure={async (file) => {
                     const resource = await api<Resource>(`/resources/${file.key ?? file.path}`, { notify: false });
                     return resource.parsed ? { sections: resource.parsed.nodes, blocks: resource.parsed.blocks ?? [] } : null;
                   }}
-                  onPin={(folder, pinned) => { void mutate(`/foundry/resources/${folder.path}`, "PATCH", { pinned }); }}
-                  canPin={(folder) => resources.some((row) => row.id === folder.path && row.canWrite)}
-                  onMove={(item, parentId) => { void mutate(`/foundry/resources/${item.kind === "file" ? item.key ?? item.path : item.path}`, "PATCH", { parentId }); }}
+                  onPin={(folder, pinned) => mutateItem(folder, { pinned })}
+                  canPin={(folder) => drive.byPath.get(folder.path)?.canWrite === true}
+                  onMove={(item, parentId) => mutateItem(item, { parentId })}
                   getMoveDestinations={() => [{ id: null, label: "Root" }, ...resources.filter((row) => row.kind === "folder" && row.canWrite).map((row) => ({ id: row.id, label: row.name }))]}
                 />
               </> : tab === "knowledge" ? <div className="flex h-full">
@@ -231,6 +277,7 @@ export default function FoundryApp({ profile }: { profile: Profile }) {
                   event.target.value = "";
                 }} />
               </label>}
+              <ImportedOrigin key={`${focus.id}:${focus.locator?.sourceRevision ?? ""}`} documentId={focus.id} onError={fail} />
               <DocumentView key={`${focus.id}:${focus.locator?.sourceRevision ?? ""}`}
               documentId={focus.id} initialNode={focus.locator?.nodeId} focusBlockIds={focus.locator?.blocks.map((block) => block.id)}
               focusPage={focus.locator?.page ?? undefined} initialTab="parsed" embedded userId={me.identity.objectId}

@@ -29,5 +29,9 @@
     "syntheticUploads": false,
     "vendorProcessing": false
   },
+  "imports": {
+    "selectedDataApproved": false,
+    "googleDriveApproved": false
+  },
   "nativeProof": null
 }

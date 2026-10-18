@@ -10,6 +10,9 @@ import { buildIndex } from "../server/indexing";
 import { testConfig, testOids } from "./foundry-fixtures";
 import { runSnapshotSchema } from "../shared/observability";
 import { wikiRevisionSchema } from "../server/wiki/provenance";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import type { ImportConnection } from "../shared/selected-imports";
 
 test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI interactions; no Azure", async () => {
   const previous = process.env.FOUNDRY_CONFIG_FILE;
@@ -25,6 +28,7 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
   const page = await context.newPage();
+  const selectionDirectory = resolve(".data", `customer-import-browser-${randomUUID()}`);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -35,6 +39,11 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
     await page.getByRole("heading", { name: "Activation blocked" }).waitFor();
     assert(await page.getByText("Native two-user REST/MCP contract spike is unverified.", { exact: true }).isVisible());
     assert.equal(await page.getByRole("button", { name: "Ask IQ + Foundry" }).count(), 0);
+    await page.getByRole("button", { name: "Connect local files", exact: true }).click();
+    assert(await page.getByText("Nothing has been uploaded or connected.", { exact: false }).isVisible());
+    await page.getByRole("button", { name: "Connect Google Drive", exact: true }).click();
+    assert(await page.getByText("Google Drive: configure an approved Google OAuth client", { exact: false }).isVisible());
+    assert.equal(await page.locator('input[type="file"]').count(), 0, "Blocked setup never selects or uploads files");
 
     const documentId = "50000000-0000-4000-8000-000000000001";
     const folderId = "50000000-0000-4000-8000-000000000002";
@@ -59,6 +68,18 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
       ] });
     let revoked = false;
     let readOnly = false;
+    const connections: ImportConnection[] = [];
+    let receiptFailure = false;
+    let denyCollectionReadback = false;
+    let googleSelection = false;
+    const collectionResources = () => connections.flatMap((connection) => [
+      { ...resource, id: connection.rootId, kind: "folder", name: connection.label, parent_id: null },
+      ...connection.items.filter((item) => item.state === "verified" && item.name).map((item) =>
+        ({ ...resource, id: item.id, name: item.name!, parent_id: connection.rootId })),
+    ]);
+    const verify = (connection: ImportConnection, index: number, name: string) =>
+      Object.assign(connection.items[index], { state: "verified", name });
+    const importRequests: { path: string; body: string }[] = [];
     const submitted: { question: string; scope: { folderIds: string[]; fileTypes: string[]; createdBefore?: string; contentKind?: string } }[] = [];
     const nativeSubmitted: typeof submitted = [];
     await page.route(`${origin}/api/**`, async (route) => {
@@ -68,9 +89,33 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
       if (path === "/api/foundry/me") return answer({ identity: { tenantId: testConfig.tenantId, objectId: testOids.A },
         workspaceId: testConfig.workspaceId, workspaceName: "OFFLINE synthetic UI", projectEndpoint: testConfig.projectEndpoint,
         modelDeployment: "offline", vendorProcessingApproved: false, roster: testConfig.roster });
-      if (path === "/api/resources") return answer(revoked ? [] : [resource, { ...resource, id: folderId, kind: "folder", name: "Synthetic folder", parent_id: null }]);
+      if (path === "/api/resources") return answer(revoked || denyCollectionReadback ? [] :
+        [resource, { ...resource, id: folderId, kind: "folder", name: "Synthetic folder", parent_id: null }, ...collectionResources()]);
       if (path === `/api/resources/${documentId}`) return answer(revoked ? { error: "Current access unavailable" } : resource, revoked ? 409 : 200);
+      if (path.startsWith("/api/resources/")) {
+        const row = collectionResources().find((item) => path === `/api/resources/${item.id}`);
+        return row && !revoked && !denyCollectionReadback ? answer(row) : answer({ error: "Current access unavailable" }, 409);
+      }
       if (path === "/api/foundry/status") return answer({ ownerOnlyPending: [] });
+      if (path === "/api/foundry/connections") return revoked ? answer({ error: "Current source access unavailable" }, 403) : answer({
+        knowledgeBaseName: "OFFLINE selected KB", selectedDataApproved: true, googleAvailable: true, googleBlocker: null, richDocumentsAvailable: false,
+        connections,
+        selection: googleSelection ? [{ id: "offline_google", name: "OFFLINE selected Google doc", mimeType: "application/vnd.google-apps.document" }] : null,
+      });
+      if (path === "/api/foundry/imports/local" || path === "/api/foundry/imports/google") {
+        importRequests.push({ path, body: request.postDataBuffer()?.toString() ?? "" });
+        const google = path.endsWith("/google"), loose = importRequests.at(-1)!.body.includes("Local files/");
+        const connection: ImportConnection = { id: randomUUID(), rootId: randomUUID(), provider: google ? "google" : "local",
+          label: google ? "Synthetic Google collection" : loose ? "Local files" : "Synthetic selected folder",
+          items: Array.from({ length: loose && !receiptFailure ? 2 : 1 }, () => ({ id: randomUUID(), state: "pending", parse: "ready", revision: 1 })) };
+        connections.push(connection);
+        if (google) googleSelection = false;
+        return answer({ connectionId: connection.id, results: [
+          ...connection.items.map((item) => ({ key: item.id, id: item.id, state: "pending" })),
+          ...(receiptFailure ? [{ key: "failed", state: "failed", error: "Synthetic rejected item" }] : []),
+        ] }, 202);
+      }
+      if (path.startsWith("/api/foundry/origins/")) return answer(null);
       if (path === "/api/foundry/wiki-stale") return answer([]);
       if (path === "/api/foundry/evidence") return answer(revoked ? [] : [evidence]);
       if (path === "/api/foundry/wiki") return answer(revoked ? [] : [wiki]);
@@ -94,6 +139,105 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
       return answer({ error: "Unsupported offline UI fixture operation" }, 410);
     });
     await page.reload();
+    await page.getByRole("heading", { name: "Connect your data. Ask Foundry IQ." }).waitFor();
+    assert(await page.getByText("OFFLINE selected KB", { exact: true }).isVisible());
+    assert(await page.getByRole("button", { name: "Connect local files", exact: true }).isEnabled());
+    assert(await page.getByRole("button", { name: "Connect Google Drive", exact: true }).isEnabled());
+    assert(await page.getByRole("button", { name: "Ask a source-cited question" }).isDisabled());
+    await mkdir(resolve(selectionDirectory, "Operations"), { recursive: true });
+    await writeFile(resolve(selectionDirectory, "Operations", "policy.md"), "# Synthetic policy");
+    await writeFile(resolve(selectionDirectory, ".env"), "SYNTHETIC_NOT_A_SECRET=example");
+    await writeFile(resolve(selectionDirectory, "image.png"), "not an image");
+    await page.getByLabel("Choose local folder", { exact: true }).setInputFiles(selectionDirectory);
+    const policy = page.getByLabel(/Operations\/policy\.md/);
+    assert.equal(await policy.isChecked(), false, "Folder selection never automatically selects content for upload");
+    assert(await page.getByLabel(/\/\.env/).isDisabled());
+    assert(await page.getByLabel(/\/image\.png/).isDisabled());
+    await policy.check();
+    assert(await page.getByRole("button", { name: "Ingest selected local files into Foundry IQ" }).isDisabled());
+    await page.getByLabel(/I authorize processing this selection/).check();
+    await page.getByRole("button", { name: "Ingest selected local files into Foundry IQ" }).click();
+    await page.getByRole("heading", { name: "Import receipts—not retrieval readiness" }).waitFor();
+    assert.equal(importRequests.length, 1);
+    assert(importRequests[0].body.includes("Operations/policy.md"));
+    assert(!importRequests[0].body.includes("SYNTHETIC_NOT_A_SECRET"));
+    assert.equal(submitted.length, 0, "Import never automatically submits a retrieval");
+    assert(await page.getByRole("button", { name: "Ask a source-cited question" }).isDisabled());
+    assert.equal(await page.getByText("policy.md · revision 1", { exact: false }).count(), 0);
+    assert.equal(await page.getByRole("region", { name: "3D library", exact: true }).count(), 0, "202 never opens 3D");
+    const openConnect = () => page.locator("aside").first().getByRole("button", { name: "Connect data", exact: true }).click();
+    const assert3D = async (name: string, absent?: string) => {
+      const spatial = page.getByRole("region", { name: "3D library", exact: true });
+      await spatial.waitFor();
+      await spatial.locator("canvas").waitFor();
+      assert(await spatial.locator("canvas").evaluate((canvas: HTMLCanvasElement) => canvas.width > 0 && canvas.height > 0 &&
+        !!canvas.getContext("webgl2")), "The actual Three.js renderer, not a placeholder, created its WebGL canvas");
+      const items = spatial.getByRole("list", { name: "Library items", exact: true });
+      await items.getByRole("button", { name: `Document: ${name}`, exact: true }).waitFor({ state: "attached" });
+      assert.equal(await items.getByRole("button", { name: `Document: ${resource.name}`, exact: true }).count(), 0, "Unrelated originals stay outside the imported collection");
+      if (absent) assert.equal(await items.getByRole("button", { name: `Document: ${absent}`, exact: true }).count(), 0);
+    };
+    verify(connections[0], 0, "policy.md");
+    await assert3D("policy.md");
+    await openConnect();
+    const chooseLoose = async () => {
+      await page.getByLabel("Choose local files", { exact: true }).setInputFiles([
+        { name: "notes.md", mimeType: "text/markdown", buffer: Buffer.from("# Synthetic notes") },
+        { name: "pending.md", mimeType: "text/markdown", buffer: Buffer.from("# Synthetic pending") },
+      ]);
+      assert.equal(await page.getByLabel(/Local files\/notes\.md/).isChecked(), false);
+      await page.getByLabel(/Local files\/notes\.md/).check();
+      await page.getByLabel(/Local files\/pending\.md/).check();
+      await page.getByLabel(/I authorize processing this selection/).check();
+      await page.getByRole("button", { name: "Ingest selected local files into Foundry IQ" }).click();
+      await page.getByRole("heading", { name: "Import receipts—not retrieval readiness" }).waitFor();
+    };
+    await chooseLoose();
+    assert(importRequests[1].body.includes('Local files/notes.md') && importRequests[1].body.includes('Local files/pending.md'));
+    verify(connections[1], 0, "notes.md");
+    await page.getByText("1 / 2 files verified in Foundry IQ", { exact: false }).waitFor();
+    assert.equal(await page.getByRole("region", { name: "3D library", exact: true }).count(), 0, "Partial indexing does not auto-navigate");
+    connections[1].items[1].state = "failed";
+    const looseCollection = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Local files · Local files", exact: true }) });
+    await looseCollection.getByText("1 / 2 files verified in Foundry IQ · 1 failed", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("region", { name: "3D library", exact: true }).count(), 0, "Native failure does not auto-navigate");
+    await looseCollection.getByRole("button", { name: "View verified files in 3D" }).click();
+    await assert3D("notes.md", "pending.md");
+    await openConnect();
+    receiptFailure = true;
+    await chooseLoose();
+    verify(connections[2], 0, "notes.md");
+    await page.getByText("Some selected files failed.", { exact: false }).waitFor();
+    await page.getByText("notes.md · revision 1", { exact: false }).nth(1).waitFor();
+    assert.equal(await page.getByRole("region", { name: "3D library", exact: true }).count(), 0, "A failed receipt prevents auto-open even when every accepted item verifies");
+    receiptFailure = false;
+    googleSelection = true;
+    await page.reload();
+    await page.getByRole("heading", { name: "Review Google selection" }).waitFor();
+    assert(await page.getByRole("button", { name: "Ingest selected Google files into Foundry IQ" }).isDisabled());
+    await page.getByLabel(/I authorize processing this selection/).check();
+    await page.getByRole("button", { name: "Ingest selected Google files into Foundry IQ" }).click();
+    await page.getByRole("heading", { name: "Import receipts—not retrieval readiness" }).waitFor();
+    assert.deepEqual(JSON.parse(importRequests[3].body), { confirm: true });
+    assert.equal(submitted.length, 0);
+    denyCollectionReadback = true;
+    verify(connections[3], 0, "Google policy.txt");
+    await page.getByRole("alert").filter({ hasText: "The imported collection is not currently authorized and verified" }).waitFor();
+    assert.equal(await page.getByRole("region", { name: "3D library", exact: true }).count(), 0, "Current resource readback is required before 3D handoff");
+    denyCollectionReadback = false;
+    const googleCollection = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Synthetic Google collection · Google Drive", exact: true }) });
+    await googleCollection.getByRole("button", { name: "View verified files in 3D" }).click();
+    await assert3D("Google policy.txt");
+    await openConnect();
+    googleSelection = true;
+    await page.reload();
+    await page.getByRole("heading", { name: "Review Google selection" }).waitFor();
+    await page.getByLabel(/I authorize processing this selection/).check();
+    await page.getByRole("button", { name: "Ingest selected Google files into Foundry IQ" }).click();
+    await page.getByRole("heading", { name: "Import receipts—not retrieval readiness" }).waitFor();
+    verify(connections[4], 0, "Google confirmed.txt");
+    await assert3D("Google confirmed.txt");
+    assert.equal(submitted.length, 0, "Neither connector adds an automatic retrieval/model call for the 3D handoff");
     await page.getByRole("button", { name: "chat", exact: true }).click();
     const consoleRegion = page.getByRole("region", { name: "Authorized run observability" });
     await consoleRegion.waitFor();
@@ -164,11 +308,16 @@ test("OFFLINE browser: real blocked startup and explicitly synthetic active-UI i
     assert.equal(await page.getByRole("link", { name: "source", exact: true }).count(), 0);
     assert.equal(await page.getByText("Synthetic launch is October 15.", { exact: true }).count(), 0);
     assert.equal(await page.getByRole("option", { name: /Run 1/ }).count(), 0);
+    await page.getByRole("button", { name: "Connect data", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "Current source access unavailable" }).waitFor();
+    assert.equal(await page.getByText("policy.md · revision 1", { exact: false }).count(), 0);
+    assert.equal(await page.getByRole("heading", { name: "Connected snapshots" }).count(), 0);
     assert.deepEqual(errors, []);
   } finally {
     await context.close(); await browser.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await runtime.close();
+    await rm(selectionDirectory, { recursive: true, force: true });
     if (previous === undefined) delete process.env.FOUNDRY_CONFIG_FILE; else process.env.FOUNDRY_CONFIG_FILE = previous;
   }
 });
