@@ -114,6 +114,13 @@ acknowledged file; never re-upload files to make a delayed counter advance.
 
 ## Cited answers and independent provenance
 
+Partial HTTP 206 retrievals and non-null native response/activity errors stop
+before the final answer call. Failed attempts still consume their question and
+request allowance; they are never converted to an empty-evidence success.
+Successful native response/reference/activity payloads are retained in the
+protected local catalog for provenance and contract diagnosis, without request
+headers or credentials. They are not public logs or a second retrieval.
+
 After native readiness and chat approval, ask questions in **Ask Foundry IQ**.
 Numbered source cards identify the actual native file and chunk; clicking one
 opens the matching local original and selects it in 3D. Source identity is never

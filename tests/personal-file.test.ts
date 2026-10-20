@@ -342,6 +342,32 @@ test("request bound persists across clients and budget reservations never reset 
     assert.throws(() => store.approve(excess.id, "OFFLINE"), /remaining-budget/);
   } finally { testStore.close(); }
 });
+test("partial responses and native activity errors block answers while consuming the same question allowance", async () => {
+  const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
+  try {
+    const { store } = testStore, run = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", fake.transport);
+    for (const stage of ["ingest", "kb"] as const) {
+      const plan = store.makePlan(stage, personalTestConfig, personalTestBounds); store.approve(plan.id, "OFFLINE setup");
+      await run(plan.id, stage);
+    }
+    const plan = store.makePlan("chat", personalTestConfig, { ...personalTestBounds, questions: 3 });
+    store.approve(plan.id, "OFFLINE bounded error responses");
+    for (const mode of ["partial", "activity", "root"] as const) {
+      const guarded = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", async (url, init) => {
+        const result = await fake.transport(url, init);
+        if (!url.includes("/retrieve?")) return result;
+        const body = await result.json() as { activity: unknown[]; error?: unknown };
+        if (mode === "activity") body.activity = [{ type: "file", error: { code: "OFFLINE-source-failure" } }];
+        if (mode === "root") body.error = { code: "OFFLINE-retrieval-failure" };
+        return new Response(JSON.stringify(body), { status: mode === "partial" ? 206 : 200, headers: { "request-id": "OFFLINE-error" } });
+      });
+      await assert.rejects(guarded(plan.id, "chat", "What is the Cedar evidence?"), mode === "partial" ? /206/ : /reported an error/);
+    }
+    assert.equal(store.operations().find((operation) => operation.id === plan.id)!.questionsUsed, 3);
+    assert.equal(store.answers().length, 0);
+    assert.equal(fake.requests.filter((request) => request.url.includes("/openai/v1/")).length, 0);
+  } finally { testStore.close(); }
+});
 test("context cap measures the actual serialized answer request, including escaped question/schema overhead", async () => {
   const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
   try {

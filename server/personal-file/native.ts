@@ -92,7 +92,7 @@ export function createNativeClient(config: PersonalConfig, store: PersonalStore,
     const requestId = responseRequestId(response), etag = response.headers.get("etag");
     store.journal(plan, "http-ack", { ordinal: requests, method, path, status: response.status, requestId, etag });
     if (options.absent && response.status === 404) { await response.body?.cancel(); return null; }
-    if (!response.ok) { await response.body?.cancel(); throw new NativeHttpError(response.status); }
+    if (!response.ok || response.status === 206) { await response.body?.cancel(); throw new NativeHttpError(response.status); }
     let body: Record<string, unknown>;
     try { body = object.parse(await response.json()); }
     catch { throw new HttpError(502, "Native response is not a supported JSON object; acknowledgment remains retained"); }
@@ -213,12 +213,16 @@ export function createNativeClient(config: PersonalConfig, store: PersonalStore,
         outputMode: "extractiveData", retrievalReasoningEffort: { kind: "low" }, includeActivity: true,
         knowledgeSourceParams: [{ kind: "file", knowledgeSourceName: config.sourceName, includeReferences: true, includeReferenceSourceData: true }],
       } });
+      if (result!.body.error != null) throw new HttpError(502, "Native retrieval reported an error; no answer or fallback is permitted");
       const response = z.object({
         response: z.array(z.object({ content: z.array(z.object({ type: z.literal("text"), text: z.string().max(200000) })) })),
         references: z.array(z.object({ type: z.literal("file"), id: z.string(), sourceData: object })),
         activity: z.array(z.object({ type: z.string() }).passthrough()),
       }).parse(result!.body);
+      if (response.activity.some((item) => item.error != null))
+        throw new HttpError(502, "Native retrieval activity reported an error; no answer or fallback is permitted");
       if (response.activity.some((item) => item.type === "modelAnswerSynthesis")) throw new HttpError(502, "Unexpected IQ answer synthesis");
+      store.journal(plan, "native-retrieval", response);
       const references = new Map(response.references.map((reference) => [reference.id, reference]));
       if (references.size !== response.references.length) throw new HttpError(502, "Duplicate native references");
       return response.response.flatMap((message) => message.content.flatMap((content) =>
