@@ -287,7 +287,7 @@ test("native non-vector null dimensions are supported; invalid vector dimensions
     } finally { testStore.close(); }
   }
 });
-test("model drift stops before mutation; incomplete index statistics retain partial state", async () => {
+test("model drift stops before mutation; delayed statistics complete without repeating uploads", async () => {
   const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
   try {
     const { store } = testStore, plan = store.makePlan("ingest", personalTestConfig, personalTestBounds); store.approve(plan.id, "OFFLINE");
@@ -307,6 +307,13 @@ test("model drift stops before mutation; incomplete index statistics retain part
       url.includes("/stats?") ? new Response(JSON.stringify({ documentCount: 0, storageSize: 0 }), { status: 200 }) : fake.transport(url, init))
       (next.id, "ingest"), /statistics do not yet confirm/);
     assert.equal(store.snapshot()!.state, "partial"); assert.equal(fake.files.length, 7);
+    const filePosts = fake.requests.filter((request) => request.method === "POST" && request.url.includes("/files?")).length;
+    const verification = store.makePlan("ingest", personalTestConfig, { ...personalTestBounds, maxRequests: 20, incrementalAllowanceUsd: 0.01 });
+    store.approve(verification.id, "OFFLINE receipt-backed completion verification");
+    await createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", fake.transport)(verification.id, "ingest");
+    assert.equal(store.snapshot()!.state, "indexed");
+    assert.equal(fake.files.length, 7);
+    assert.equal(fake.requests.filter((request) => request.method === "POST" && request.url.includes("/files?")).length, filePosts);
   } finally { testStore.close(); }
 });
 test("uncertain upload is retained and never replayed, including after recovery", async () => {

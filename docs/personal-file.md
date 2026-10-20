@@ -108,6 +108,9 @@ different contexts, CMK overrides and other nondefault drift still stop the run.
 The native schema may return null dimensions on non-vector fields. Vector fields
 still require positive integer dimensions and the selected embedding size before
 any upload.
+Index statistics can lag successful synchronous uploads. A separately approved
+receipt-backed continuation can recheck completion while skipping every
+acknowledged file; never re-upload files to make a delayed counter advance.
 
 ## Cited answers and independent provenance
 
