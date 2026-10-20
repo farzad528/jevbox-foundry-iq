@@ -1,5 +1,18 @@
 # Jevbox + Foundry IQ
 
+## Personal desktop files: picker, 3D and native File-KS
+
+Open **[`start-personal.cmd`](start-personal.cmd)** on Windows, or run
+`npm run start:personal` with Node.js 24.6+. The separate workspace opens at
+**http://localhost:4388** with a real file/folder picker, Jevbox 3D/Finder,
+local original previews, a visible chat pane and Azure index provenance.
+Local selection works without Azure and is explicitly **not indexed**.
+Native uploads, KB creation, paid chat and content inspection remain separately
+approved in chat; no cloud operation happens on launch. The complete live
+journey is not yet verified. See the [personal walkthrough and operator
+boundaries](docs/personal-file.md). The existing guarded shared profile below
+is unchanged.
+
 ## Foundry IQ fork
 
 This fork adds an isolated, approval-gated Entra / Foundry IQ profile with a

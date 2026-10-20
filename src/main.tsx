@@ -6,6 +6,7 @@ import { ThemeProvider } from "./components/theme";
 import { LoaderPreview } from "./components/loader-preview";
 import "./styles.css";
 import FoundryApp from "./foundry-app";
+import PersonalFileApp from "./personal-file-app";
 import { useEffect, useState } from "react";
 function ProfileApp() {
   const [profile, setProfile] = useState<{ profile: string; activated: boolean; blockers: string[] } | null>(null);
@@ -19,6 +20,7 @@ function ProfileApp() {
   if (error) return <p role="alert">{error}</p>;
   if (!profile) return <p className="p-6">Loading workspace profile…</p>;
   if (profile.profile === "foundry-iq") return <FoundryApp profile={{ ...profile, profile: "foundry-iq" }} />;
+  if (profile.profile === "personal-file") return <PersonalFileApp />;
   if (profile.profile === "legacy") return <App />;
   return <p role="alert">Unknown server profile; login and retrieval remain disabled.</p>;
 }

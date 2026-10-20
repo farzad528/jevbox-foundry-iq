@@ -1,16 +1,16 @@
-import { createApp } from "./app";
 import { resolve } from "node:path";
 import express from "express";
-import { queues } from "./jobs";
-import { createFoundryApp } from "./foundry/app";
+const profile = process.env.JEVBOX_PROFILE ?? "legacy";
+if (!["legacy", "foundry-iq", "personal-file"].includes(profile)) throw new Error("Unknown application profile; refusing legacy fallback");
 const port = Number(process.env.PORT ?? 4310);
 const origin = process.env.APP_ORIGIN ?? `http://localhost:${port}`;
-const runtime = process.env.JEVBOX_PROFILE === "foundry-iq" ? await createFoundryApp({
+const runtime = profile === "personal-file" ? await (await import("./personal-file/app")).createPersonalApp({ origin })
+  : profile === "foundry-iq" ? await (await import("./foundry/app")).createFoundryApp({
   origin, workers: process.env.NODE_ENV !== "production",
-}) : await createApp({
+}) : await (await import("./app")).createApp({
   directory: resolve(process.env.DATA_DIR ?? ".data"),
   origin,
-  workers: process.env.NODE_ENV === "production" ? [] : Object.values(queues),
+  workers: process.env.NODE_ENV === "production" ? [] : Object.values((await import("./jobs")).queues),
 });
 if (process.env.NODE_ENV === "production") {
   runtime.app.use(express.static(resolve("dist"), { index: false }));

@@ -1,0 +1,38 @@
+.personal-workspace { height:100dvh; display:flex; flex-direction:column; background:var(--background, #fafafa); color:var(--foreground, #171717); font:14px system-ui; }
+.personal-workspace button,.personal-workspace a { cursor:pointer; }
+.personal-workspace button { border:1px solid #8886; border-radius:7px; padding:7px 10px; background:transparent; color:inherit; }
+.personal-workspace button:hover:not(:disabled),.personal-workspace button[aria-pressed=true],.personal-workspace .selected { background:#648bdb26; }
+.personal-workspace button:disabled { opacity:.45; cursor:not-allowed; }
+.personal-header { padding:14px 20px; border-bottom:1px solid #8884; display:flex; gap:20px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.personal-header nav,.personal-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.personal-header small { display:block; margin-top:7px; opacity:.7; }
+.personal-badge { border:1px solid #688bd4; color:#688bd4; border-radius:12px; padding:3px 9px; margin-left:12px; font-size:11px; }
+.personal-body { display:flex; flex:1; min-height:0; }
+.personal-tree { width:200px; flex-shrink:0; overflow:auto; border-right:1px solid #8884; padding:14px; }
+.personal-tree button { display:block; width:100%; text-align:left; margin:8px 0; overflow-wrap:anywhere; }
+.personal-tree small { display:block; opacity:.65; margin-top:4px; }
+.personal-library { flex:1; display:flex; flex-direction:column; min-width:0; }
+.personal-toolbar { padding:12px 16px; }
+.personal-toolbar h1 { font-size:17px; font-weight:600; margin-right:auto; }
+.personal-caption { font-size:11px; opacity:.7; padding:0 16px 8px; }
+.personal-spatial { flex:1; position:relative; min-height:330px; overflow:hidden; }
+.personal-empty { padding:64px 32px; text-align:center; max-width:650px; margin:auto; }
+.personal-empty h2 { font-size:25px; font-weight:600; }.personal-empty p { margin:20px 0; opacity:.7; }
+.personal-empty button { margin:8px; }
+.personal-chat { width:340px; flex-shrink:0; display:flex; flex-direction:column; border-left:1px solid #8884; padding:16px; gap:12px; }
+.personal-chat h2,.personal-tree h2 { font-size:16px; font-weight:600; }
+.personal-chat>p { font-size:12px; opacity:.75; }
+.personal-conversation { flex:1; overflow:auto; }
+.personal-conversation article { border-top:1px solid #8884; margin-top:16px; padding-top:14px; }
+.personal-conversation h3 { font-weight:600; }.personal-answer { white-space:pre-wrap; margin:12px 0; line-height:1.65; }
+.personal-source { padding:10px 0; font-size:12px; }.personal-source blockquote { border-left:2px solid #688bd4; padding:6px 10px; margin:8px 0; white-space:pre-wrap; }
+.personal-source small { display:block; overflow-wrap:anywhere; opacity:.65; margin:6px 0; }
+.personal-chat textarea { display:block; width:100%; min-height:90px; margin:8px 0; padding:9px; border:1px solid #8886; border-radius:7px; background:transparent; }
+.personal-drawer,.personal-alert,.personal-notice { padding:12px 20px; border-bottom:1px solid #8884; max-height:250px; overflow:auto; }
+.personal-drawer h2 { font-weight:600; }.personal-drawer p { margin:8px 0; }.personal-drawer li { font-size:12px; margin:4px 0; }.personal-alert { background:#be33331c; }.personal-notice { background:#688bd41a; }
+.personal-overlay { position:fixed; inset:7% 8%; z-index:60; background:var(--background,#fff); color:var(--foreground,#171717); border:1px solid #8888; border-radius:12px; box-shadow:0 15px 100px #0005; padding:24px; overflow:auto; }
+.personal-overlay h2 { font-size:20px; font-weight:600; margin:16px 0; }.personal-overlay p { margin:12px 0; }.personal-overlay pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:16px; background:#8881; }
+.personal-overlay a { color:#4b82db; text-decoration:underline; }.personal-original { display:flex; flex-direction:column; }.personal-original iframe { flex:1; width:100%; border:0; min-height:400px; }
+.personal-workspace footer { padding:8px 16px; font-size:10px; opacity:.65; border-top:1px solid #8884; }
+@media(max-width:1000px) { .personal-tree { width:160px; }.personal-chat { width:280px; } }
+@media(max-width:740px) { .personal-body { flex-wrap:wrap; overflow:auto; }.personal-tree { width:25%; }.personal-library { width:75%; min-height:450px; }.personal-chat { width:100%; min-height:400px; } }

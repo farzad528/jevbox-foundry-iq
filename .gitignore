@@ -29,6 +29,8 @@ playwright-report/
 *.native-proof.local.json
 *.msal-cache*
 *.spike.local.json
+*.personal-plan.local.json
+preflight-*.private.json
 foundry-spike-private/
 
 .terraform/
