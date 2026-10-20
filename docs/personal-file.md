@@ -143,6 +143,11 @@ opens the matching local original and selects it in 3D. Source identity is never
 inferred from a title. Unverified native reference shapes stop rather than
 fabricate a file/page/trace.
 
+PDF originals use Jevbox's existing local PDFium viewer instead of a browser PDF
+plugin in a sandboxed iframe. Original responses retain their restrictive
+security policy; the viewer renders document bytes, not executable source
+instructions. Opening an original is local and does not repeat ingestion or Q&A.
+
 **Azure provenance** displays the last observed actual source/index/KB lineage
 and schema. The index name comes from native `createdResources.index`, not a
 guessed suffix. **Open Azure AI Search** opens only service metadata. Use your own

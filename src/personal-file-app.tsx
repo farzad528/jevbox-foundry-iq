@@ -4,6 +4,7 @@ import { importLimits, importMime, relativeImportPath } from "../shared/selected
 import { personalDrive } from "./lib/personal-drive";
 import { LibrarySpatialView } from "./components/library-spatial-view";
 import { FileSystem } from "./components/extend/file-system";
+import { PDFViewer } from "./components/extend/pdf-viewer";
 import { useTheme } from "./components/theme";
 import "./personal-file.css";
 
@@ -200,7 +201,8 @@ export default function PersonalFileApp() {
         </> : <p>Connect the reviewed private Azure configuration first. No index has been created by selecting local files.</p>}
     </section>}
     {preview && <section className="personal-overlay personal-original" aria-label="Original source"><button onClick={() => { previewSequence.current++; setPreview(null); }}>Close original</button>
-      <h2>{preview.path}</h2>{preview.url ? <iframe title={preview.path} src={preview.url} sandbox="" /> : <pre>{preview.text}</pre>}</section>}
+      <h2>{preview.path}</h2>{preview.url ? <PDFViewer key={preview.url} className="personal-pdf" src={preview.url}
+        fileName={preview.path} defaultZoom="fit-width" showUpload={false} showDownload={false} showRotateControls={false} /> : <pre>{preview.text}</pre>}</section>}
     <footer>Personal local demo · No cloud operation on launch · Shared native ACL/MCP activation remains locked · Not an official Microsoft or Extend product</footer>
   </div>;
 }

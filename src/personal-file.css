@@ -32,7 +32,7 @@
 .personal-drawer h2 { font-weight:600; }.personal-drawer p { margin:8px 0; }.personal-drawer li { font-size:12px; margin:4px 0; }.personal-alert { background:#be33331c; }.personal-notice { background:#688bd41a; }
 .personal-overlay { position:fixed; inset:7% 8%; z-index:60; background:var(--background,#fff); color:var(--foreground,#171717); border:1px solid #8888; border-radius:12px; box-shadow:0 15px 100px #0005; padding:24px; overflow:auto; }
 .personal-overlay h2 { font-size:20px; font-weight:600; margin:16px 0; }.personal-overlay p { margin:12px 0; }.personal-overlay pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:16px; background:#8881; }
-.personal-overlay a { color:#4b82db; text-decoration:underline; }.personal-original { display:flex; flex-direction:column; }.personal-original iframe { flex:1; width:100%; border:0; min-height:400px; }
+.personal-overlay a { color:#4b82db; text-decoration:underline; }.personal-original { display:flex; flex-direction:column; }.personal-original .personal-pdf { flex:1; width:100%; min-height:400px; }
 .personal-workspace footer { padding:8px 16px; font-size:10px; opacity:.65; border-top:1px solid #8884; }
 @media(max-width:1000px) { .personal-tree { width:160px; }.personal-chat { width:280px; } }
 @media(max-width:740px) { .personal-body { flex-wrap:wrap; overflow:auto; }.personal-tree { width:25%; }.personal-library { width:75%; min-height:450px; }.personal-chat { width:100%; min-height:400px; } }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import express from "express";
 import { chromium } from "playwright";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { createPersonalApp } from "../server/personal-file/app";
@@ -14,6 +14,7 @@ test("OFFLINE built browser: real picker, local persistence/WebGL/originals; exp
   mkdirSync(join(corpus, "Operations"), { recursive: true });
   writeFileSync(join(corpus, "Operations", "policy.md"), "# OFFLINE synthetic policy\n\nRestore target is 30 minutes.");
   writeFileSync(join(corpus, "overview.txt"), "OFFLINE overview.");
+  copyFileSync(resolve("tests", "fixtures", "foundry-documents", "cedar-release-approval-notes.pdf"), join(corpus, "release-notes.pdf"));
   const host = express(), server = host.listen(0, "127.0.0.1");
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address(); assert(address && typeof address !== "string");
@@ -49,12 +50,42 @@ test("OFFLINE built browser: real picker, local persistence/WebGL/originals; exp
     await page.getByText("Local - not indexed", { exact: true }).first().waitFor();
     const stateResponse = await page.request.get(`${origin}/api/personal/state`);
     const saved = await stateResponse.json() as PersonalState;
-    assert.equal(saved.snapshot!.documents.length, 2);
+    assert.equal(saved.snapshot!.documents.length, 3);
     assert(saved.snapshot!.documents.some((document) => document.path === "Synthetic drive/Operations/policy.md"));
     assert.equal(saved.configured, false); assert.equal(saved.operations.length, 0);
     await page.getByRole("button", { name: "policy.md", exact: false }).first().click();
     await page.locator('[aria-label="Original source"]').waitFor();
     assert(await page.getByText("Restore target is 30 minutes.", { exact: false }).isVisible());
+    await page.getByRole("button", { name: "Close original", exact: true }).click();
+    await page.getByRole("button", { name: "release-notes.pdf", exact: false }).first().click();
+    const original = page.locator('[aria-label="Original source"]');
+    await original.getByRole("heading", { name: "Synthetic drive/release-notes.pdf", exact: true }).waitFor();
+    assert.equal(await original.locator("iframe").count(), 0);
+    await page.waitForFunction(() => [...window.document.querySelectorAll<HTMLImageElement | HTMLCanvasElement>('[aria-label="Original source"] img, [aria-label="Original source"] canvas')]
+      .some((element) => {
+        if (element instanceof HTMLImageElement && (!element.complete || !element.naturalWidth || !element.src.startsWith("blob:"))) return false;
+        if (element instanceof HTMLCanvasElement && (!element.width || !element.height)) return false;
+        const bounds = element.getBoundingClientRect();
+        if (bounds.width < 200 || bounds.height < 200 || bounds.bottom <= 0 || bounds.top >= window.innerHeight) return false;
+        const canvas = window.document.createElement("canvas");
+        canvas.width = canvas.height = 256;
+        const context = canvas.getContext("2d")!;
+        context.drawImage(element, 0, 0, 256, 256);
+        const pixels = context.getImageData(0, 0, 256, 256).data;
+        let ink = false, paper = false;
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (!pixels[i + 3]) continue;
+          ink ||= pixels[i] < 150 && pixels[i + 1] < 150 && pixels[i + 2] < 150;
+          paper ||= pixels[i] > 230 && pixels[i + 1] > 230 && pixels[i + 2] > 230;
+        }
+        return ink && paper;
+      }));
+    const pdf = saved.snapshot!.documents.find((entry) => entry.path.endsWith("release-notes.pdf"))!;
+    const pdfResponse = await page.request.get(`${origin}/api/personal/originals/${pdf.id}`);
+    assert.equal(pdfResponse.headers()["content-security-policy"], "sandbox; default-src 'none'");
+    assert.equal(pdfResponse.headers()["content-type"], "application/pdf");
+    assert.equal((await pdfResponse.body()).subarray(0, 5).toString(), "%PDF-");
+    assert(await page.locator(".personal-tree button.selected").getByText("release-notes.pdf", { exact: false }).isVisible());
     await page.getByRole("button", { name: "Close original", exact: true }).click();
     await page.getByRole("button", { name: "Azure provenance", exact: true }).click();
     assert(await page.getByText("No index has been created by selecting local files.", { exact: false }).isVisible());
