@@ -105,6 +105,9 @@ its journals, recreate it or interpret main-workflow proof as its recovery.
 Readback permits only the selected service/entity's OData context and the native
 File source's empty permission-options default. Nonempty permission settings,
 different contexts, CMK overrides and other nondefault drift still stop the run.
+The native schema may return null dimensions on non-vector fields. Vector fields
+still require positive integer dimensions and the selected embedding size before
+any upload.
 
 ## Cited answers and independent provenance
 

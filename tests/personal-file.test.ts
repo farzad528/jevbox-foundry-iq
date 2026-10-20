@@ -62,8 +62,8 @@ export function syntheticPersonalTransport(config: PersonalConfig) {
     if (path.endsWith("/docs/search")) return response({ value: [{ uid: "chunk-probe", snippet_parent_id: "native-0", snippet: "CUOCR34298637" }] });
     if (path.endsWith("/stats")) return response({ documentCount: 7, storageSize: 1024, vectorIndexSize: 512 });
     if (path.startsWith("/indexes(")) return response({ name: "observed-index", fields: [
-      { name: "uid", type: "Edm.String", key: true, retrievable: true }, { name: "snippet", type: "Edm.String", retrievable: true },
-      { name: "snippet_parent_id", type: "Edm.String", retrievable: true, filterable: false },
+      { name: "uid", type: "Edm.String", key: true, retrievable: true, dimensions: null }, { name: "snippet", type: "Edm.String", retrievable: true, dimensions: null },
+      { name: "snippet_parent_id", type: "Edm.String", retrievable: true, filterable: false, dimensions: null },
       { name: "vector", type: "Collection(Edm.Single)", dimensions: 1536 },
     ] });
     if (path.startsWith("/knowledgesources(")) {
@@ -267,6 +267,25 @@ test("known native content rejection is failed, not a successful or replayable u
     assert.equal(store.snapshot()!.documents.filter((file) => file.state === "failed").length, 1);
     assert.equal(store.snapshot()!.state, "partial");
   } finally { testStore.close(); }
+});
+test("native non-vector null dimensions are supported; invalid vector dimensions stop before uploads", async () => {
+  for (const dimensions of [undefined, null, 0, -1, 1.5, 3072]) {
+    const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
+    try {
+      const { store } = testStore, plan = store.makePlan("ingest", personalTestConfig, personalTestBounds);
+      store.approve(plan.id, "OFFLINE schema regression approval");
+      const run = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", async (url, init) => {
+        const result = await fake.transport(url, init);
+        if (!url.includes("/indexes('observed-index')?")) return result;
+        const body = await result.json() as { fields: { type: string; dimensions?: number | null }[] };
+        body.fields.find((field) => field.type === "Collection(Edm.Single)")!.dimensions = dimensions;
+        return new Response(JSON.stringify(body), { status: 200, headers: { "request-id": "OFFLINE-schema" } });
+      });
+      await assert.rejects(run(plan.id, "ingest"), dimensions === 3072 ? /dimensions do not match/ : /schema contract failed at fields\.3\.dimensions/);
+      assert.equal(fake.files.length, 0);
+      assert.equal(store.db.prepare("SELECT count(*) AS n FROM journal WHERE event='upload-intent'").get()!.n, 0);
+    } finally { testStore.close(); }
+  }
 });
 test("model drift stops before mutation; incomplete index statistics retain partial state", async () => {
   const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);

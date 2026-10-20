@@ -109,10 +109,14 @@ export function createNativeClient(config: PersonalConfig, store: PersonalStore,
   };
   const schema = async (index: string) => {
     const result = await call(`/indexes('${index}')`);
-    return z.object({ name: z.literal(index), fields: z.array(z.object({
+    const parsed = z.object({ name: z.literal(index), fields: z.array(z.object({
       name: z.string(), type: z.string(), key: z.boolean().optional(), retrievable: z.boolean().optional(),
-      searchable: z.boolean().optional(), filterable: z.boolean().optional(), dimensions: z.number().optional(),
-    })) }).parse(result!.body);
+      searchable: z.boolean().optional(), filterable: z.boolean().optional(), dimensions: z.number().int().positive().nullish(),
+    }).refine((field) => field.type !== "Collection(Edm.Single)" || field.dimensions != null,
+      { path: ["dimensions"], message: "Native vector field dimensions are required" })) }).safeParse(result!.body);
+    if (!parsed.success) throw new HttpError(502,
+      `Generated index schema contract failed at ${parsed.error.issues.map((issue) => issue.path.join(".")).join(", ")}; no upload or fallback is permitted`);
+    return parsed.data;
   };
   const inspect = async (index: string, fileId?: string) => {
     const definition = await schema(index), fields = definition.fields;
