@@ -129,6 +129,14 @@ case-folded paths, titles and chunk-ID prefixes are not identity fallbacks.
 If a parent ID is also returned, it must agree with that original's native ID.
 The returned chunk key remains an opaque chunk locator, never an original ID.
 
+The final model's structured `citationIds` are constrained to the retrieved ID
+allowlist. The answer must use those IDs verbatim in separate `[ID]` markers;
+combined markers, renumbered IDs, missing/undeclared markers and uncited
+non-abstention answers remain errors. Parsed generated answers and safe
+validation categories are retained only in the protected local catalog, without
+request headers or authentication credentials. Rejected outputs are never
+published as answers, and diagnostics never authorize another paid attempt.
+
 After native readiness and chat approval, ask questions in **Ask Foundry IQ**.
 Numbered source cards identify the actual native file and chunk; clicking one
 opens the matching local original and selects it in 3D. Source identity is never

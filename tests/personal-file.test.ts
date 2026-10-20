@@ -416,6 +416,51 @@ test("partial responses and native activity errors block answers while consuming
     assert.equal(fake.requests.filter((request) => request.url.includes("/openai/v1/")).length, 0);
   } finally { testStore.close(); }
 });
+test("final model citation contract constrains IDs and privately diagnoses every rejected output without delivery", async () => {
+  const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
+  try {
+    const { store } = testStore, run = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", fake.transport);
+    for (const stage of ["ingest", "kb"] as const) {
+      const plan = store.makePlan(stage, personalTestConfig, personalTestBounds); store.approve(plan.id, "OFFLINE setup");
+      await run(plan.id, stage);
+    }
+    const chat = store.makePlan("chat", personalTestConfig, personalTestBounds); store.approve(chat.id, "OFFLINE output validation");
+    const cases = [
+      { answer: "Cedar evidence [0]", citationIds: ["0"], error: null },
+      { answer: "Cedar evidence [other]", citationIds: ["other"], error: "unknown-citation-ids" },
+      { answer: "Cedar evidence", citationIds: ["0"], error: "missing-citation-markers" },
+      { answer: "Cedar evidence [0][other]", citationIds: ["0"], error: "undeclared-citation-markers" },
+      { answer: "Cedar evidence [0, 0]", citationIds: ["0"], error: "missing-citation-markers" },
+      { answer: "Cedar evidence [0]", citationIds: ["[0]"], error: "unknown-citation-ids" },
+      { answer: "Cedar evidence", citationIds: [], error: "uncited-answer" },
+      { answer: "I don't know", citationIds: [], error: null },
+      { answer: "I don't know", citationIds: ["0"], error: "invalid-abstention" },
+    ];
+    for (const expected of cases) {
+      const guarded = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", async (url, init) => {
+        const result = await fake.transport(url, init);
+        if (!url.includes("/openai/v1/")) return result;
+        const request = JSON.parse(String(init.body));
+        assert.deepEqual(request.response_format.json_schema.schema.properties.citationIds.items.enum, ["0"]);
+        assert.match(request.messages[0].content, /each citation in separate square brackets/);
+        return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: {
+          content: JSON.stringify({ answer: expected.answer, citationIds: expected.citationIds }),
+        } }] }), { headers: result.headers });
+      });
+      if (expected.error) await assert.rejects(guarded(chat.id, "chat", "OFFLINE citation contract"), new RegExp(expected.error));
+      else await guarded(chat.id, "chat", "OFFLINE citation contract");
+    }
+    const diagnostics = store.db.prepare("SELECT body FROM journal WHERE operation_id=? AND event='generated-answer' ORDER BY sequence").all(chat.id)
+      .map((row) => JSON.parse(String(row.body)));
+    assert.equal(diagnostics.length, cases.length);
+    assert.equal(diagnostics.filter((entry) => entry.validationErrors.length).length, 7);
+    assert(diagnostics.every((entry) => !Object.hasOwn(entry, "headers") && !Object.hasOwn(entry, "authorization")));
+    assert.equal(store.answers().length, 2);
+    assert.equal(store.answers()[1].answer, "I don't know");
+    assert.deepEqual(store.answers()[1].citations, []);
+    assert.equal(store.operations().find((operation) => operation.id === chat.id)!.questionsUsed, cases.length);
+  } finally { testStore.close(); }
+});
 test("context cap measures the actual serialized answer request, including escaped question/schema overhead", async () => {
   const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
   try {
