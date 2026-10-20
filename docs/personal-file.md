@@ -90,6 +90,9 @@ performs one IQ retrieve and at most one final project-model answer per question
 Its durable allowance is at most ten questions including proof and follow-ups,
 not a new allowance per tab/reload. Limits and reserved allowances do not reset
 on errors/restart and are not Azure-enforced billing caps.
+The context cap conservatively measures the full serialized answer request,
+including escaped input, system instructions and schema overhead. Exceeding it
+stops before the answer call; any preceding IQ work still consumes its allowance.
 Selected model versions are re-read before and after ingestion, KB setup and
 answer generation. Auto-upgrade drift stops further work/delivery; it never
 silently moves the frozen snapshot onto another model version.

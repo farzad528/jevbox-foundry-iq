@@ -301,3 +301,17 @@ test("request bound persists across clients and budget reservations never reset 
     assert.throws(() => store.approve(excess.id, "OFFLINE"), /remaining-budget/);
   } finally { testStore.close(); }
 });
+test("context cap measures the actual serialized answer request, including escaped question/schema overhead", async () => {
+  const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
+  try {
+    const { store } = testStore, run = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", fake.transport);
+    for (const stage of ["ingest", "kb"] as const) {
+      const plan = store.makePlan(stage, personalTestConfig, personalTestBounds); store.approve(plan.id, "OFFLINE"); await run(plan.id, stage);
+    }
+    const chat = store.makePlan("chat", personalTestConfig, personalTestBounds); store.approve(chat.id, "OFFLINE");
+    await assert.rejects(run(chat.id, "chat", `Q${"\0".repeat(3500)}`), /Serialized answer context exceeds/);
+    assert.equal(fake.requests.filter((request) => request.url.includes("/retrieve?")).length, 1);
+    assert.equal(fake.requests.filter((request) => request.url.includes("/chat/completions")).length, 0);
+    assert.equal(store.operations().find((operation) => operation.id === chat.id)!.questionsUsed, 1);
+  } finally { testStore.close(); }
+});
