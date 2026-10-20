@@ -32,13 +32,17 @@ export const kbDefinition = (config: PersonalConfig) => ({
 });
 export function assertDefinition(actual: unknown, expected: unknown, config: PersonalConfig) {
   const raw = object.parse(actual);
+  const entity = object.parse(expected).kind === "file" ? "knowledgesources" : "knowledgebases";
+  if (raw["@odata.context"] !== undefined && raw["@odata.context"] !== `${config.searchEndpoint}/$metadata#${entity}/$entity`)
+    throw new HttpError(409, "Native metadata context escaped the selected service or entity");
   if (canonical(raw.encryptionKey ?? null) !== canonical(config.inheritedEncryption))
     throw new HttpError(409, "Encryption readback differs from the reviewed inherited service-level CMK baseline");
   const normalize = (value: unknown, parent = ""): unknown => {
     if (Array.isArray(value)) return value.map((entry) => normalize(entry, parent));
     if (!value || typeof value !== "object") return value;
     return Object.fromEntries(Object.entries(value).flatMap(([key, item]) => {
-      if (key === "@odata.etag" || (parent === "" && key === "encryptionKey") ||
+      if (key === "@odata.etag" || (parent === "" && (key === "encryptionKey" || key === "@odata.context")) ||
+          (entity === "knowledgesources" && parent === "ingestionParameters" && key === "ingestionPermissionOptions" && Array.isArray(item) && item.length === 0) ||
           (parent === "fileParameters" && key === "createdResources") || item === null ||
           (key === "alwaysQuery" && item === false)) return [];
       if (parent === "azureOpenAIParameters" && key === "resourceUri" && typeof item === "string")

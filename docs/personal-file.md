@@ -102,6 +102,9 @@ Only a newly reviewed continuation with authoritative app-owned creation/upload
 journals may upload never-attempted ordinals. The earlier standalone canary lacks
 those original upload records and remains untouched/unverified; do not rebuild
 its journals, recreate it or interpret main-workflow proof as its recovery.
+Readback permits only the selected service/entity's OData context and the native
+File source's empty permission-options default. Nonempty permission settings,
+different contexts, CMK overrides and other nondefault drift still stop the run.
 
 ## Cited answers and independent provenance
 

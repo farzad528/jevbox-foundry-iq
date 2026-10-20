@@ -68,11 +68,14 @@ export function syntheticPersonalTransport(config: PersonalConfig) {
     ] });
     if (path.startsWith("/knowledgesources(")) {
       if (method === "PUT") { assert.equal(new Headers(init.headers).get("If-None-Match"), "*"); assert.equal(source, false); source = true; }
-      return source ? response({ ...sourceDefinition(config), fileParameters: { ...sourceDefinition(config).fileParameters, createdResources: { index: "observed-index" } } }, method === "PUT" ? 201 : 200, "source-v1") : response({}, 404);
+      return source ? response({ ...sourceDefinition(config), "@odata.context": `${config.searchEndpoint}/$metadata#knowledgesources/$entity`,
+        fileParameters: { ...sourceDefinition(config).fileParameters,
+          ingestionParameters: { ...sourceDefinition(config).fileParameters.ingestionParameters, ingestionPermissionOptions: [] },
+          createdResources: { index: "observed-index" } } }, method === "PUT" ? 201 : 200, "source-v1") : response({}, 404);
     }
     if (path.startsWith("/knowledgebases(")) {
       if (method === "PUT") { assert.equal(kb, false); kb = true; }
-      return kb ? response(kbDefinition(config), method === "PUT" ? 201 : 200, "kb-v1") : response({}, 404);
+      return kb ? response({ ...kbDefinition(config), "@odata.context": `${config.searchEndpoint}/$metadata#knowledgebases/$entity` }, method === "PUT" ? 201 : 200, "kb-v1") : response({}, 404);
     }
     throw new Error(`Unexpected synthetic route: ${path}`);
   };
@@ -99,10 +102,22 @@ test("native source/KB CMK inheritance is explicit; overrides and other definiti
   assert.throws(() => personalConfigSchema.parse({ ...config, inheritedEncryption: { ...encryption, identity: { applicationId: "OFFLINE-override" } } }));
   for (const desired of [sourceDefinition(config), kbDefinition(config)]) {
     assert.doesNotThrow(() => assertDefinition({ ...desired, "@odata.etag": "v1", encryptionKey: encryption, description: null }, desired, config));
+    const entity = "kind" in desired ? "knowledgesources" : "knowledgebases";
+    assert.doesNotThrow(() => assertDefinition({ ...desired, encryptionKey: encryption,
+      "@odata.context": `${config.searchEndpoint}/$metadata#${entity}/$entity` }, desired, config));
+    assert.throws(() => assertDefinition({ ...desired, encryptionKey: encryption,
+      "@odata.context": `${config.searchEndpoint}/$metadata#indexes/$entity` }, desired, config), /metadata context/);
     assert.throws(() => assertDefinition({ ...desired, encryptionKey: { ...encryption, isServiceLevelKey: false } }, desired, config));
     assert.throws(() => assertDefinition({ ...desired, encryptionKey: { ...encryption, keyVaultKeyVersion: "v2" } }, desired, config));
     assert.throws(() => assertDefinition({ ...desired, encryptionKey: encryption, unexpected: true }, desired, config));
   }
+  const desired = sourceDefinition(personalTestConfig);
+  const observed = { ...desired, "@odata.context": `${personalTestConfig.searchEndpoint}/$metadata#knowledgesources/$entity`,
+    fileParameters: { ...desired.fileParameters, ingestionParameters: { ...desired.fileParameters.ingestionParameters, ingestionPermissionOptions: [] } } };
+  assert.doesNotThrow(() => assertDefinition(observed, desired, personalTestConfig));
+  assert.throws(() => assertDefinition({ ...observed, "@odata.context": "https://other.search.windows.net/$metadata#knowledgesources/$entity" }, desired, personalTestConfig), /metadata context/);
+  assert.throws(() => assertDefinition({ ...observed, fileParameters: { ...observed.fileParameters,
+    ingestionParameters: { ...observed.fileParameters.ingestionParameters, ingestionPermissionOptions: ["userIds"] } } }, desired, personalTestConfig), /differs/);
 });
 test("unapproved/expired/config-drift plans make zero native requests; active lease survives another connection", async () => {
   const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
