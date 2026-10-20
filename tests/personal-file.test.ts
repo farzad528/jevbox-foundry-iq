@@ -55,8 +55,10 @@ export function syntheticPersonalTransport(config: PersonalConfig) {
     }
     if (path.endsWith("/files")) return response({ value: files });
     if (path.endsWith("/retrieve")) return response({
-      response: [{ content: [{ type: "text", text: JSON.stringify([{ ref_id: "0", content: "Cedar evidence" }]) }] }],
-      references: [{ type: "file", id: "0", sourceData: { snippet_parent_id: "native-1", uid: "chunk-1", snippet: "Cedar evidence" } }], activity: [],
+      response: [{ content: [{ type: "text", text: JSON.stringify([{ ref_id: 0, content: "Cedar evidence" }]) }] }],
+      references: [{ type: "file", id: "0", sourceData: {
+        uid: "chunk-1", snippet: "Cedar evidence", metadata_storage_path: files[1]?.fileName,
+      } }], activity: [],
     });
     if (path.includes("/openai/v1/")) return response({ choices: [{ finish_reason: "stop", message: { content: JSON.stringify({ answer: "Cedar evidence [0]", citationIds: ["0"] }) } }] });
     if (path.endsWith("/docs/search")) return response({ value: [{ uid: "chunk-probe", snippet_parent_id: "native-0", snippet: "CUOCR34298637" }] });
@@ -186,6 +188,52 @@ test("app-owned continuation uses original ACK/journals and never re-creates the
     assert.equal(store.snapshot()!.state, "indexed");
     assert.equal(fake.requests.filter((request) => request.method === "PUT").length, 1);
     assert.equal(fake.files.length, 7);
+  } finally { testStore.close(); }
+});
+test("native evidence IDs and exact acknowledged file paths reject title and chunk-prefix inference", async () => {
+  const testStore = localStore(), fake = syntheticPersonalTransport(personalTestConfig);
+  try {
+    const { store } = testStore, run = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", fake.transport);
+    for (const stage of ["ingest", "kb"] as const) {
+      const plan = store.makePlan(stage, personalTestConfig, personalTestBounds); store.approve(plan.id, "OFFLINE setup");
+      await run(plan.id, stage);
+    }
+    const chat = store.makePlan("chat", personalTestConfig, personalTestBounds); store.approve(chat.id, "OFFLINE reference validation");
+    const modes = ["string", "fraction", "negative", "unsafe", "basename", "case", "unknown", "parent-only", "parent-conflict", "excerpt-mismatch"] as const;
+    for (const mode of modes) {
+      const guarded = createPersonalWorkflow(store, personalTestConfig, async () => "OFFLINE", async (url, init) => {
+        const result = await fake.transport(url, init);
+        if (!url.includes("/retrieve?")) return result;
+        let id: string | number = 0;
+        const data: Record<string, unknown> = {
+          uid: "opaque-unrelated-chunk", snippet: "Cedar evidence", metadata_storage_path: fake.files[1].fileName,
+        };
+        if (mode === "string") id = "0";
+        if (mode === "fraction") id = 0.5;
+        if (mode === "negative") id = -1;
+        if (mode === "unsafe") id = Number.MAX_SAFE_INTEGER + 1;
+        if (mode === "basename") data.metadata_storage_path = "cedar-launch-plan.md";
+        if (mode === "case") data.metadata_storage_path = "cedar/cedar-launch-plan.md";
+        if (mode === "unknown") data.metadata_storage_path = "Other/cedar-launch-plan.md";
+        if (mode === "parent-only") {
+          delete data.metadata_storage_path; data.snippet_parent_id = "native-1"; data.uid = "native-1_0";
+        }
+        if (mode === "parent-conflict") data.snippet_parent_id = "native-2";
+        if (mode === "excerpt-mismatch") data.snippet = "Different source evidence";
+        return new Response(JSON.stringify({
+          response: [{ content: [{ type: "text", text: JSON.stringify([{ ref_id: id, content: "Cedar evidence" }]) }] }],
+          references: [{ type: "file", id: "0", sourceData: data }], activity: [],
+        }), { headers: result.headers });
+      });
+      if (mode === "string") {
+        await guarded(chat.id, "chat", "OFFLINE exact native reference");
+        assert.equal(store.answers()[0].citations[0].fileId, "native-1");
+        assert.equal(store.answers()[0].citations[0].chunkId, "opaque-unrelated-chunk");
+      } else await assert.rejects(guarded(chat.id, "chat", "OFFLINE invalid native reference"), /contract|cannot be bound/);
+    }
+    assert.equal(store.operations().find((operation) => operation.id === chat.id)!.questionsUsed, 10);
+    assert.equal(store.answers().length, 1);
+    assert.equal(fake.requests.filter((request) => request.url.includes("/openai/v1/")).length, 1);
   } finally { testStore.close(); }
 });
 test("missing original creation journals and stale metadata block without native calls", async () => {

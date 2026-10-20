@@ -121,6 +121,14 @@ Successful native response/reference/activity payloads are retained in the
 protected local catalog for provenance and contract diagnosis, without request
 headers or credentials. They are not public logs or a second retrieval.
 
+Native extractive reference IDs may be strings or nonnegative safe integers.
+Each reference's exact `metadata_storage_path` must identify one indexed
+original in the frozen manifest, whose path and acknowledged native file ID are
+verified against the native inventory before and after chat. Basenames,
+case-folded paths, titles and chunk-ID prefixes are not identity fallbacks.
+If a parent ID is also returned, it must agree with that original's native ID.
+The returned chunk key remains an opaque chunk locator, never an original ID.
+
 After native readiness and chat approval, ask questions in **Ask Foundry IQ**.
 Numbered source cards identify the actual native file and chunk; clicking one
 opens the matching local original and selects it in 3D. Source identity is never

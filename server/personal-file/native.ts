@@ -226,11 +226,17 @@ export function createNativeClient(config: PersonalConfig, store: PersonalStore,
       const references = new Map(response.references.map((reference) => [reference.id, reference]));
       if (references.size !== response.references.length) throw new HttpError(502, "Duplicate native references");
       return response.response.flatMap((message) => message.content.flatMap((content) =>
-        z.array(z.object({ ref_id: z.string(), content: z.string().min(1) })).max(100).parse(JSON.parse(content.text)).map((chunk) => {
+        z.array(z.object({
+          ref_id: z.union([z.string().min(1), z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)]).transform(String),
+          content: z.string().min(1),
+        })).max(100).parse(JSON.parse(content.text)).map((chunk) => {
           const reference = references.get(chunk.ref_id), data = reference?.sourceData;
-          const fileId = z.string().min(1).parse(data?.snippet_parent_id), chunkId = z.string().min(1).parse(data?.uid);
-          const document = store.snapshot()!.documents.find((item) => item.nativeFileId === fileId && item.state === "indexed");
-          if (!document || typeof data?.snippet !== "string" || !data.snippet.includes(chunk.content))
+          const chunkId = z.string().min(1).parse(data?.uid);
+          const originals = store.snapshot()!.documents.filter((item) =>
+            item.path === data?.metadata_storage_path && item.state === "indexed" && !!item.nativeFileId);
+          const document = originals.length === 1 ? originals[0] : undefined, fileId = document?.nativeFileId;
+          if (!document || !fileId || typeof data?.snippet !== "string" || !data.snippet.includes(chunk.content) ||
+              Object.hasOwn(data, "snippet_parent_id") && data.snippet_parent_id !== fileId)
             throw new HttpError(502, "Native reference cannot be bound to an indexed original; title-only association is forbidden");
           return { id: chunk.ref_id, documentId: document.id, path: document.path, fileId, chunkId, excerpt: chunk.content };
         })));
