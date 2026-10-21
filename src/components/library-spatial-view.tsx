@@ -62,6 +62,7 @@ type Props = {
   scope: string;
   selectedPath: string | null;
   sidebarWidth?: number;
+  documentClickHint?: string;
   onSelect: (entry: Entry | null) => void;
   onOpen: (entry: Entry) => void;
   loadPreviewImageUrl?: (
@@ -3631,7 +3632,7 @@ export function LibrarySpatialView(props: Props) {
       <div className="library-space-guide" id="spatial-controls-help">
         <span>Drag items to move · Drag the background to look around</span>
         <span>Scroll or WASD to float</span>
-        <span>Click a document, then a row to preview its blocks</span>
+        <span>{props.documentClickHint ?? "Click a document, then a row to preview its blocks"}</span>
       </div>
       {unavailable && (
         <div className="library-space-unavailable" role="status">

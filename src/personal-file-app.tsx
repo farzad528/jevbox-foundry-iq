@@ -20,7 +20,7 @@ export default function PersonalFileApp() {
   const [csrf, setCsrf] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState("");
   const [review, setReview] = useState(false), [inspector, setInspector] = useState(false), [connection, setConnection] = useState(false);
   const [view, setView] = useState<"3d" | "finder">("3d"), [scope, setScope] = useState(""), [selected, setSelected] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ path: string; url?: string; text?: string } | null>(null);
+  const [preview, setPreview] = useState<{ id: string; path: string; url?: string; text?: string } | null>(null);
   const [provenance, setProvenance] = useState<Provenance | null>(null), [question, setQuestion] = useState("");
   const files = useRef<HTMLInputElement>(null), folder = useRef<HTMLInputElement>(null);
   const previewSequence = useRef(0);
@@ -51,6 +51,7 @@ export default function PersonalFileApp() {
     return () => clearInterval(timer);
   }, [csrf, refresh]);
   const documents = draft.length ? draft.map((entry) => entry.document) : state?.snapshot?.documents ?? [];
+  const previewDocument = documents.find((document) => document.id === preview?.id);
   const drive = useMemo(() => personalDrive(documents), [documents]);
   const selectFiles = (list: FileList | null) => {
     if (!list) return;
@@ -87,12 +88,12 @@ export default function PersonalFileApp() {
     try {
       const item = draft.find((entry) => entry.document.id === id);
       if (document.mime === "application/pdf") {
-        setPreview({ path: document.path, url: item ? draftUrls.get(id)! : `/api/personal/originals/${id}` });
+        setPreview({ id, path: document.path, url: item ? draftUrls.get(id)! : `/api/personal/originals/${id}` });
       } else {
         const response = item ? null : await fetch(`/api/personal/originals/${id}`);
         if (response && !response.ok) throw new Error("Original is no longer available");
         const text = item ? await item.file.text() : await response!.text();
-        if (sequence === previewSequence.current) setPreview({ path: document.path, text });
+        if (sequence === previewSequence.current) setPreview({ id, path: document.path, text });
       }
     } catch (error) { setError(error instanceof Error ? error.message : "Original unavailable"); }
   };
@@ -111,6 +112,7 @@ export default function PersonalFileApp() {
     Date.parse(entry.expiresAt) > Date.now() && (stage !== "chat" || entry.questionsUsed < entry.questionLimit));
   const chatReady = state?.snapshot?.state === "ready" && approved("chat");
   const showProvenance = async () => {
+    previewSequence.current++; setPreview(null);
     setInspector(true);
     try { setProvenance(await request<Provenance>("provenance")); }
     catch (error) { setError(error instanceof Error ? error.message : "Provenance unavailable"); }
@@ -158,7 +160,9 @@ export default function PersonalFileApp() {
             <p>Choose local files or a folder to see your originals here immediately. Nothing goes to Azure without its exact approval.</p>
             <button onClick={() => files.current?.click()}>Choose files</button><button onClick={() => folder.current?.click()}>Choose a folder</button></div>
             : view === "3d" ? <LibrarySpatialView items={drive.items} scope={scope} selectedPath={selected}
-              onSelect={(entry) => setSelected(entry?.path ?? null)} onOpen={(entry) => entry.kind === "folder" ? setScope(entry.path) : void open(entry.key)}
+              onSelect={(entry) => { setSelected(entry?.path ?? null); if (entry?.kind === "file") void open(entry.key); }}
+              onOpen={(entry) => entry.kind === "folder" ? setScope(entry.path) : void open(entry.key)}
+              documentClickHint="Click a document to open its original and indexing details"
               loadPreviewImageUrl={async () => null} loadDocumentStructure={async () => null} />
               : <FileSystem items={drive.items} view="icons" path={scope} onPathChange={setScope}
                 onFileOpen={(file) => void open(file.key!)} onSelectionChange={(item) => setSelected(item?.path ?? null)}
@@ -201,7 +205,16 @@ export default function PersonalFileApp() {
         </> : <p>Connect the reviewed private Azure configuration first. No index has been created by selecting local files.</p>}
     </section>}
     {preview && <section className="personal-overlay personal-original" aria-label="Original source"><button onClick={() => { previewSequence.current++; setPreview(null); }}>Close original</button>
-      <h2>{preview.path}</h2>{preview.url ? <PDFViewer key={preview.url} className="personal-pdf" src={preview.url}
+      <h2>{preview.path}</h2>
+      <div className="personal-original-metadata">
+        {previewDocument?.state === "indexed" && previewDocument.nativeFileId && state?.snapshot?.indexName ? <>
+          <strong>Indexed in Azure AI Search (last verified)</strong>
+          <p>Native file: <code>{previewDocument.nativeFileId}</code><br />Index: <code>{state.snapshot.indexName}</code></p>
+          <button onClick={() => void showProvenance()}>Show indexed provenance</button>
+        </> : <strong>{previewDocument?.state === "local" ? "Local original - not indexed" : `Indexing state: ${previewDocument?.state ?? "unavailable"}`}</strong>}
+        <p>Viewing the local original. Opening it does not query or recheck Azure.</p>
+      </div>
+      {preview.url ? <PDFViewer key={preview.url} className="personal-pdf" src={preview.url}
         fileName={preview.path} defaultZoom="fit-width" showUpload={false} showDownload={false} showRotateControls={false} /> : <pre>{preview.text}</pre>}</section>}
     <footer>Personal local demo · No cloud operation on launch · Shared native ACL/MCP activation remains locked · Not an official Microsoft or Extend product</footer>
   </div>;

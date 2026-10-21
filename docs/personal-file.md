@@ -21,7 +21,13 @@ generate model answers. Missing dependencies are restored from the pinned lockfi
 3. Click **Save selected snapshot locally**. This stores an immutable private
    local copy, not an Azure upload. The initial app policy is 40 files,
    8 MiB/file and 32 MiB/batch; native content detection still decides admission.
-4. Open documents from the tree or 3D view. **Finder** switches the library view.
+4. Single-click a document card in **3D** to open its local original; the tree and
+   source citations open the same preview. Indexed originals show their
+   last-verified native file ID and generated index, with **Show indexed
+   provenance** for cached Azure evidence. Opening a preview does not recheck
+   Azure, and local-only files are explicitly labeled not indexed. **Finder**
+   switches the library view. Folder selection and camera dragging stay separate
+   from opening documents.
 5. Open **Connection & approvals** for the next required stage. Until real
    ingestion, KB verification and paid-session approval, chat remains visibly
    disabled. There are no canned answers or silent provider fallbacks.

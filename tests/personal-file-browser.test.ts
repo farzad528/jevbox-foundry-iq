@@ -53,6 +53,31 @@ test("OFFLINE built browser: real picker, local persistence/WebGL/originals; exp
     assert.equal(saved.snapshot!.documents.length, 3);
     assert(saved.snapshot!.documents.some((document) => document.path === "Synthetic drive/Operations/policy.md"));
     assert.equal(saved.configured, false); assert.equal(saved.operations.length, 0);
+    await page.getByRole("button", { name: "Synthetic drive/", exact: false }).first().click();
+    await page.getByRole("button", { name: "View everything", exact: true }).click();
+    const hit = await page.waitForFunction((path) => {
+      const canvas = window.document.querySelector(".library-space-canvas canvas");
+      if (!canvas) return null;
+      const bounds = canvas.getBoundingClientRect();
+      for (let y = bounds.top + 12; y < bounds.bottom; y += 12) {
+        for (let x = bounds.left + 12; x < bounds.right; x += 12) {
+          canvas.dispatchEvent(new PointerEvent("pointermove", { clientX: x, clientY: y, pointerType: "mouse", bubbles: true }));
+          if (canvas.parentElement?.dataset.entryPath === path) return { x, y };
+        }
+      }
+      return null;
+    }, "Synthetic drive/overview.txt");
+    const point = await hit.jsonValue(); assert(point);
+    await page.mouse.click(point.x, point.y);
+    const localPreview = page.locator('[aria-label="Original source"]');
+    await localPreview.getByRole("heading", { name: "Synthetic drive/overview.txt", exact: true }).waitFor();
+    assert(await localPreview.getByText("OFFLINE overview.", { exact: true }).isVisible());
+    assert(await localPreview.getByText("Local original - not indexed", { exact: true }).isVisible());
+    assert(await localPreview.getByText("Viewing the local original. Opening it does not query or recheck Azure.", { exact: true }).isVisible());
+    await page.getByRole("button", { name: "Close original", exact: true }).click();
+    const folderButton = page.getByRole("button", { name: "Folder: Operations", exact: true });
+    await folderButton.focus(); await folderButton.press("Space");
+    assert.equal(await page.locator('[aria-label="Original source"]').count(), 0, "Folder selection does not open a document preview");
     await page.getByRole("button", { name: "policy.md", exact: false }).first().click();
     await page.locator('[aria-label="Original source"]').waitFor();
     assert(await page.getByText("Restore target is 30 minutes.", { exact: false }).isVisible());
@@ -93,7 +118,7 @@ test("OFFLINE built browser: real picker, local persistence/WebGL/originals; exp
 
     const document = saved.snapshot!.documents.find((entry) => entry.path.endsWith("policy.md"))!;
     const active: PersonalState = { ...saved, configured: true, blocker: "OFFLINE UI fixture only",
-      snapshot: { ...saved.snapshot!, state: "ready", documents: saved.snapshot!.documents.map((entry) => ({ ...entry, state: "indexed", nativeFileId: `OFFLINE-${entry.id}` })) },
+      snapshot: { ...saved.snapshot!, state: "ready", indexName: "offline-generated-index", documents: saved.snapshot!.documents.map((entry) => ({ ...entry, state: "indexed", nativeFileId: `OFFLINE-${entry.id}` })) },
       operations: [{ id: "OFFLINE-session", stage: "chat", state: "approved", expiresAt: new Date(Date.now() + 60000).toISOString(), questionsUsed: 0, questionLimit: 10 }] };
     await page.route(`${origin}/api/personal/state`, (route) => route.fulfill({ json: active }));
     await page.route(`${origin}/api/personal/execute/OFFLINE-session`, async (route) => {
@@ -111,6 +136,12 @@ test("OFFLINE built browser: real picker, local persistence/WebGL/originals; exp
     await page.getByRole("button", { name: `[0] ${document.path}`, exact: true }).click();
     await page.locator('[aria-label="Original source"]').waitFor();
     assert(await page.locator('[aria-label="Original source"]').isVisible());
+    assert(await page.locator('[aria-label="Original source"]').getByText("Indexed in Azure AI Search (last verified)", { exact: true }).isVisible());
+    assert(await page.locator('[aria-label="Original source"]').getByText(`OFFLINE-${document.id}`, { exact: true }).isVisible());
+    assert(await page.locator('[aria-label="Original source"]').getByText("offline-generated-index", { exact: true }).isVisible());
+    await page.locator('[aria-label="Original source"]').getByRole("button", { name: "Show indexed provenance", exact: true }).click();
+    await page.locator('[aria-label="Azure provenance inspector"]').waitFor();
+    assert.equal(await page.locator('[aria-label="Original source"]').count(), 0, "Provenance is not covered by the original preview");
     assert(await page.locator(".personal-tree button.selected").getByText("policy.md", { exact: false }).isVisible());
     assert.equal(runtime.store.answers().length, 0, "Synthetic frontend chat is never represented as native backend evidence");
     assert.deepEqual(errors, []); assert.deepEqual(external, []);
